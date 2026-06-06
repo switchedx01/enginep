@@ -1,0 +1,1061 @@
+/* =========================================================================
+ * hub_gui.c - Central Communication Hub for Harmony Player
+ * Architecture: Native C + SDL2 + ZeroMQ + SQLite3
+ * Compliance: P10 Safety Rules & Harmony Design Mandates
+ * ========================================================================= */
+
+#include <SDL2/SDL.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <math.h>
+#include <signal.h>
+#include <sqlite3.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#include <zmq.h>
+
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "/mnt/mass-storage/Archive/Documents/dev/Harmony_Retooled/include/vendor/stb_truetype.h"
+#define STB_IMAGE_IMPLEMENTATION
+#include "/mnt/mass-storage/Archive/Documents/dev/Harmony_Retooled/include/utils/common.h"
+#include "/mnt/mass-storage/Archive/Documents/dev/Harmony_Retooled/include/vendor/stb_image.h"
+
+/* =========================================================================
+ * Constants & Configuration
+ * ========================================================================= */
+
+#define WINDOW_WIDTH 900
+#define WINDOW_HEIGHT 600
+#define SIDEBAR_WIDTH 250
+#define FONT_PATH                                                              \
+  "/mnt/mass-storage/Archive/Documents/dev/Harmony_Retooled/assets/fonts/"     \
+  "Roboto-Regular.ttf"
+#define DB_PATH                                                                \
+  "/mnt/mass-storage/Archive/Documents/dev/Harmony_Retooled/harmony_v2.db"
+#define MAX_RESULTS 5
+
+/* =========================================================================
+ * Type Definitions
+ * ========================================================================= */
+
+typedef struct {
+  char title[MAX_SONG_TITLE];
+  char artist[MAX_SONG_TITLE];
+  char filepath[MAX_PATH_LENGTH];
+  char art_path[MAX_PATH_LENGTH];
+} SearchResult;
+
+typedef struct {
+  SDL_Color bg;
+  SDL_Color top_bar;
+  SDL_Color accent;
+  SDL_Color target_accent;
+  SDL_Color text_main;
+  SDL_Color text_dim;
+} HubTheme;
+
+typedef struct {
+  float x, y, w, h;
+  float target_x, target_y;
+  float target_w, target_h;
+  int stage; // 1: Full, 2: Medium, 3: Small
+  bool is_resizing;
+  bool is_dragging;
+  float drag_off_x, drag_off_y;
+  void (*render)(SDL_Renderer *ren, int x, int y, int w, int h, int mx, int my);
+  bool active;
+
+  // Physics for sway
+  float rotation;
+  float target_rotation;
+} HubWidget;
+
+typedef struct {
+  char path[MAX_PATH_LENGTH];
+  SDL_Texture *sharp;
+  SDL_Texture *blurred;
+} ArtCache;
+
+/* =========================================================================
+ * Global State
+ * ========================================================================= */
+
+static stbtt_bakedchar g_cdata[96]; // Regular 20px
+static stbtt_bakedchar g_hdata[96]; // Header 64px
+static SDL_Texture *g_font_tex = NULL;
+static SDL_Texture *g_hdr_tex = NULL;
+static HubTheme g_theme = {{18, 18, 18, 255},  /* bg */
+                           {25, 25, 25, 255},  /* top_bar */
+                           {0, 188, 212, 255}, /* accent */
+                           {0, 188, 212, 255}, /* target_accent */
+                           {255, 255, 255, 255}, {150, 150, 150, 255}};
+
+static bool g_sidebar_open = false;
+static float g_sidebar_anim = 0.0f;
+static char g_search_query[MAX_SONG_TITLE] = "";
+static SearchResult g_current_track = {"No active song", "Unknown Artist", "",
+                                       ""};
+static bool g_player_running = false;
+static bool g_song_selected = false;
+static bool g_is_playing = false;
+static SearchResult g_results[MAX_RESULTS];
+static int g_result_count = 0;
+static ArtCache g_art_cache = {"", NULL, NULL};
+static void *g_z_cmd_sock = NULL;
+static pid_t g_player_pid = 0;
+
+static SDL_Texture *g_widget_tex = NULL;
+// Music Widget State
+static HubWidget g_music_widget = {20,  180,  860,  160,   20,    180,
+                                   860, 160,  1,    false, false, 0,
+                                   0,   NULL, true, 0.0f,  0.0f};
+static bool g_music_widget_hover = false;
+static int g_mouse_x, g_mouse_y;
+
+void send_player_command(const char *command);
+void render_text_scaled(SDL_Renderer *ren, const char *text, float x, float y,
+                        float scale, SDL_Color col);
+void render_text(SDL_Renderer *ren, const char *text, float x, float y,
+                 SDL_Color col);
+
+/* =========================================================================
+ * Utilities & Helpers
+ * ========================================================================= */
+
+void tst_debugging(const char *format, const char *file, int line,
+                   const char *expr) {
+  fprintf(stderr, "ASSERTION FAILED: %s (%s:%d) [%s]\n", format, file, line,
+          expr);
+}
+
+static void apply_heavy_blur(unsigned char *data, int w, int h, int radius) {
+  if (!data || radius <= 0)
+    return;
+  int size = w * h * 4;
+  unsigned char *temp = malloc(size);
+  if (!temp)
+    return;
+
+  for (int pass = 0; pass < 3; pass++) {
+    memcpy(temp, data, size);
+    for (int y = 0; y < h; y++) {
+      for (int x = 0; x < w; x++) {
+        int r = 0, g = 0, b = 0, c = 0;
+        for (int nx = x - radius; nx <= x + radius; nx += 2) {
+          if (nx >= 0 && nx < w) {
+            int i = (y * w + nx) * 4;
+            r += temp[i];
+            g += temp[i + 1];
+            b += temp[i + 2];
+            c++;
+          }
+        }
+        int i = (y * w + x) * 4;
+        data[i] = r / c;
+        data[i + 1] = g / c;
+        data[i + 2] = b / c;
+      }
+    }
+    memcpy(temp, data, size);
+    for (int y = 0; y < h; y++) {
+      for (int x = 0; x < w; x++) {
+        int r = 0, g = 0, b = 0, c = 0;
+        for (int ny = y - radius; ny <= y + radius; ny += 2) {
+          if (ny >= 0 && ny < h) {
+            int i = (ny * w + x) * 4;
+            r += temp[i];
+            g += temp[i + 1];
+            b += temp[i + 2];
+            c++;
+          }
+        }
+        int i = (y * w + x) * 4;
+        data[i] = r / c;
+        data[i + 1] = g / c;
+        data[i + 2] = b / c;
+      }
+    }
+  }
+  free(temp);
+}
+
+void update_art_cache(SDL_Renderer *ren, const char *path) {
+  if (!path || path[0] == '\0' || strcmp(g_art_cache.path, path) == 0)
+    return;
+
+  if (g_art_cache.sharp)
+    SDL_DestroyTexture(g_art_cache.sharp);
+  if (g_art_cache.blurred)
+    SDL_DestroyTexture(g_art_cache.blurred);
+  strncpy(g_art_cache.path, path, MAX_PATH_LENGTH - 1);
+
+  int w, h, ch;
+  unsigned char *data = stbi_load(path, &w, &h, &ch, 4);
+  if (!data) {
+    g_art_cache.sharp = g_art_cache.blurred = NULL;
+    return;
+  }
+
+  SDL_Surface *surf = SDL_CreateRGBSurfaceWithFormatFrom(
+      data, w, h, 32, 4 * w, SDL_PIXELFORMAT_RGBA32);
+  g_art_cache.sharp = SDL_CreateTextureFromSurface(ren, surf);
+  SDL_FreeSurface(surf);
+
+  apply_heavy_blur(data, w, h, 30);
+  surf = SDL_CreateRGBSurfaceWithFormatFrom(data, w, h, 32, 4 * w,
+                                            SDL_PIXELFORMAT_RGBA32);
+  g_art_cache.blurred = SDL_CreateTextureFromSurface(ren, surf);
+  SDL_FreeSurface(surf);
+  SDL_SetTextureAlphaMod(g_art_cache.blurred, 150);
+
+  long r_sum = 0, g_sum = 0, b_sum = 0, pixel_count = w * h;
+  for (int i = 0; i < pixel_count * 4; i += 4) {
+    r_sum += data[i];
+    g_sum += data[i + 1];
+    b_sum += data[i + 2];
+  }
+  if (pixel_count > 0) {
+    g_theme.target_accent.r = (uint8_t)(r_sum / pixel_count);
+    g_theme.target_accent.g = (uint8_t)(g_sum / pixel_count);
+    g_theme.target_accent.b = (uint8_t)(b_sum / pixel_count);
+
+    if (g_theme.target_accent.r + g_theme.target_accent.g +
+            g_theme.target_accent.b <
+        200) {
+      g_theme.target_accent.r =
+          (uint8_t)fmin(255, g_theme.target_accent.r * 1.5);
+      g_theme.target_accent.g =
+          (uint8_t)fmin(255, g_theme.target_accent.g * 1.5);
+      g_theme.target_accent.b =
+          (uint8_t)fmin(255, g_theme.target_accent.b * 1.5);
+    }
+  }
+
+  stbi_image_free(data);
+}
+
+/* =========================================================================
+ * Core Functions
+ * ========================================================================= */
+
+void save_hub_state(void) {
+  FILE *f = fopen("/tmp/hub_state.json", "w");
+  if (f) {
+    fprintf(f,
+            "{\n  \"title\": \"%s\",\n  \"artist\": \"%s\",\n  \"art_path\": "
+            "\"%s\"\n}\n",
+            g_current_track.title, g_current_track.artist,
+            g_current_track.art_path);
+    fclose(f);
+  }
+}
+
+void load_hub_state(void) {
+  FILE *f = fopen("/tmp/hub_state.json", "r");
+  if (f) {
+    char line[MAX_LOG_LINE];
+    while (fgets(line, sizeof(line), f)) {
+      char *t = strstr(line, "\"title\": \"");
+      if (t) {
+        t += 10;
+        char *end = strchr(t, '\"');
+        if (end) {
+          int len = end - t;
+          strncpy(g_current_track.title, t, len);
+          g_current_track.title[len] = 0;
+        }
+      }
+      char *a = strstr(line, "\"artist\": \"");
+      if (a) {
+        a += 11;
+        char *end = strchr(a, '\"');
+        if (end) {
+          int len = end - a;
+          strncpy(g_current_track.artist, a, len);
+          g_current_track.artist[len] = 0;
+        }
+      }
+      char *art = strstr(line, "\"art_path\": \"");
+      if (art) {
+        art += 13;
+        char *end = strchr(art, '\"');
+        if (end) {
+          int len = end - art;
+          strncpy(g_current_track.art_path, art, len);
+          g_current_track.art_path[len] = 0;
+        }
+      }
+    }
+    fclose(f);
+  }
+}
+
+void update_player_status(void) {
+  g_player_running = (system("pgrep -x harmony_player > /dev/null") == 0);
+}
+
+Result perform_search(const char *query) {
+  if (!c_assert(query != NULL))
+    return RESULT_ERROR_NULL_POINTER;
+  if (strlen(query) < 2) {
+    g_result_count = 0;
+    return RESULT_SUCCESS;
+  }
+
+  sqlite3 *db;
+  if (sqlite3_open(DB_PATH, &db) != SQLITE_OK)
+    return RESULT_ERROR_FILE_IO;
+
+  const char *sql =
+      "SELECT t.title, a.name, t.filepath, al.art_filename FROM tracks t "
+      "LEFT JOIN artists a ON t.artist_id = a.id "
+      "LEFT JOIN albums al ON t.album_id = al.id "
+      "WHERE t.title LIKE ? LIMIT ?;";
+  sqlite3_stmt *stmt;
+  sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
+  char pattern[MAX_SONG_TITLE + 2];
+  snprintf(pattern, sizeof(pattern), "%%%s%%", query);
+  sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_STATIC);
+  sqlite3_bind_int(stmt, 2, MAX_RESULTS);
+
+  g_result_count = 0;
+  while (sqlite3_step(stmt) == SQLITE_ROW && g_result_count < MAX_RESULTS) {
+    strncpy(g_results[g_result_count].title,
+            (const char *)sqlite3_column_text(stmt, 0), MAX_SONG_TITLE - 1);
+    const char *artist = (const char *)sqlite3_column_text(stmt, 1);
+    strncpy(g_results[g_result_count].artist, artist ? artist : "Unknown",
+            MAX_SONG_TITLE - 1);
+    strncpy(g_results[g_result_count].filepath,
+            (const char *)sqlite3_column_text(stmt, 2), MAX_PATH_LENGTH - 1);
+    const char *art = (const char *)sqlite3_column_text(stmt, 3);
+    strncpy(g_results[g_result_count].art_path, art ? art : "",
+            MAX_PATH_LENGTH - 1);
+    g_result_count++;
+  }
+  sqlite3_finalize(stmt);
+  sqlite3_close(db);
+  return RESULT_SUCCESS;
+}
+
+void launch_player_process(const char *filepath, bool headless) {
+  if (g_player_running) {
+    if (!headless) {
+      send_player_command("SHOW_GUI");
+    }
+
+    if (filepath) {
+      char cmd[MAX_PATH_LENGTH + 32];
+      snprintf(cmd, sizeof(cmd), "LOAD %s", filepath);
+      send_player_command(cmd);
+      send_player_command("PLAY");
+    }
+    return;
+  }
+
+  g_player_pid = fork();
+  if (g_player_pid == 0) {
+    const char *workdir =
+        "/mnt/mass-storage/Archive/Documents/dev/Harmony_Retooled";
+    if (chdir(workdir) != 0) {
+      perror("chdir failed");
+      exit(1);
+    }
+
+    char *args[16];
+    int i = 0;
+    args[i++] = "./harmony_player";
+    if (headless)
+      args[i++] = "--headless";
+    if (filepath)
+      args[i++] = (char *)filepath;
+    args[i] = NULL;
+
+    int fd = open("/dev/null", O_WRONLY);
+    dup2(fd, STDOUT_FILENO);
+    dup2(fd, STDERR_FILENO);
+    close(fd);
+
+    execvp(args[0], args);
+    perror("execvp failed");
+    exit(1);
+  } else if (g_player_pid < 0) {
+    perror("fork failed");
+  }
+}
+
+void send_player_command(const char *command) {
+  if (!g_z_cmd_sock)
+    return;
+  zmq_send(g_z_cmd_sock, command, strlen(command), ZMQ_DONTWAIT);
+}
+
+/* =========================================================================
+ * UI Layer (Rendering Helpers)
+ * ========================================================================= */
+
+void draw_aa_arc(SDL_Renderer *ren, int cx, int cy, int r, int start_ang,
+                 int end_ang, int thickness, SDL_Color col) {
+  SDL_SetRenderDrawColor(ren, col.r, col.g, col.b, col.a);
+  for (int t = 0; t < thickness; t++) {
+    int cur_r = r + t;
+    for (int i = start_ang; i <= end_ang; i++) {
+      float rad = i * 3.14159f / 180.0f;
+      SDL_RenderDrawPoint(ren, cx + (int)(cosf(rad) * cur_r),
+                          cy + (int)(sinf(rad) * cur_r));
+    }
+  }
+  for (int i = start_ang; i <= end_ang; i++) {
+    float rad = i * 3.14159f / 180.0f;
+    float c = cosf(rad), s = sinf(rad);
+    SDL_SetRenderDrawColor(ren, col.r, col.g, col.b, col.a / 2);
+    SDL_RenderDrawPoint(ren, cx + (int)(c * (r + thickness)),
+                        cy + (int)(s * (r + thickness)));
+    SDL_RenderDrawPoint(ren, cx + (int)(c * (r - 1)), cy + (int)(s * (r - 1)));
+  }
+}
+
+void fill_rounded_rect_hq(SDL_Renderer *ren, int x, int y, int w, int h, int r,
+                          SDL_Color col) {
+  SDL_SetRenderDrawColor(ren, col.r, col.g, col.b, col.a);
+  SDL_Rect rects[3] = {{x + r, y, w - 2 * r, h},
+                       {x, y + r, r, h - 2 * r},
+                       {x + w - r, y + r, r, h - 2 * r}};
+  SDL_RenderFillRects(ren, rects, 3);
+
+  for (int i = 0; i < r; i++) {
+    for (int j = 0; j < r; j++) {
+      float dist = sqrtf((float)(i * i + j * j));
+      if (dist < r) {
+        if (dist > r - 1)
+          SDL_SetRenderDrawColor(ren, col.r, col.g, col.b, col.a / 2);
+        else
+          SDL_SetRenderDrawColor(ren, col.r, col.g, col.b, col.a);
+
+        SDL_RenderDrawPoint(ren, x + r - i - 1, y + r - j - 1); // TL
+        SDL_RenderDrawPoint(ren, x + w - r + i, y + r - j - 1); // TR
+        SDL_RenderDrawPoint(ren, x + r - i - 1, y + h - r + j); // BL
+        SDL_RenderDrawPoint(ren, x + w - r + i, y + h - r + j); // BR
+      }
+    }
+  }
+}
+
+void draw_rounded_mask_hq(SDL_Renderer *ren, int x, int y, int w, int h, int r,
+                          SDL_Color bg_col) {
+  SDL_SetRenderDrawColor(ren, bg_col.r, bg_col.g, bg_col.b, 255);
+  for (int i = 0; i < r; i++) {
+    for (int j = 0; j < r; j++) {
+      if (sqrtf((float)(i * i + j * j)) > r) {
+        SDL_RenderDrawPoint(ren, x + r - i - 1, y + r - j - 1); // TL
+        SDL_RenderDrawPoint(ren, x + w - r + i, y + r - j - 1); // TR
+        SDL_RenderDrawPoint(ren, x + r - i - 1, y + h - r + j); // BL
+        SDL_RenderDrawPoint(ren, x + w - r + i, y + h - r + j); // BR
+      }
+    }
+  }
+}
+
+void draw_rounded_outline_hq(SDL_Renderer *ren, int x, int y, int w, int h,
+                             int r, int thickness, SDL_Color col) {
+  SDL_SetRenderDrawColor(ren, col.r, col.g, col.b, col.a);
+  SDL_Rect edges[4] = {
+      {x + r, y - thickness + 1, w - 2 * r, thickness}, // Top
+      {x + r, y + h, w - 2 * r, thickness},             // Bottom
+      {x - thickness + 1, y + r, thickness, h - 2 * r}, // Left
+      {x + w, y + r, thickness, h - 2 * r}              // Right
+  };
+  SDL_RenderFillRects(ren, edges, 4);
+
+  for (int t = 0; t < thickness; t++) {
+    int cur_r = r + t;
+    for (float a = 0; a < 6.283f; a += 0.005f) {
+      int px = (int)(cosf(a) * cur_r);
+      int py = (int)(sinf(a) * cur_r);
+      if (a < 1.57f)
+        SDL_RenderDrawPoint(ren, x + w - r + px, y + h - r + py); // BR
+      else if (a < 3.14f)
+        SDL_RenderDrawPoint(ren, x + r + px, y + h - r + py); // BL
+      else if (a < 4.71f)
+        SDL_RenderDrawPoint(ren, x + r + px, y + r + py); // TL
+      else
+        SDL_RenderDrawPoint(ren, x + w - r + px, y + r + py); // TR
+    }
+  }
+}
+
+void draw_play_pause_button(SDL_Renderer *ren, int x, int y, int radius,
+                            bool playing, SDL_Color col) {
+  draw_rounded_outline_hq(ren, x - radius, y - radius, radius * 2, radius * 2,
+                          radius, 3, col);
+  SDL_SetRenderDrawColor(ren, col.r, col.g, col.b, col.a);
+  if (!playing) {
+    for (int i = -10; i <= 10; i++) {
+      SDL_RenderDrawLine(ren, x - 5, y + i, x + 10 - abs(i), y);
+    }
+  } else {
+    SDL_Rect bar1 = {x - 8, y - 10, 5, 20};
+    SDL_Rect bar2 = {x + 3, y - 10, 5, 20};
+    SDL_RenderFillRect(ren, &bar1);
+    SDL_RenderFillRect(ren, &bar2);
+  }
+}
+
+/* =========================================================================
+ * UI Layer (Rendering)
+ * ========================================================================= */
+
+Result init_font_system(SDL_Renderer *ren) {
+  long size;
+  unsigned char *buf;
+  FILE *f = fopen(FONT_PATH, "rb");
+  if (!f)
+    return RESULT_ERROR_FILE_IO;
+  fseek(f, 0, SEEK_END);
+  size = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  buf = malloc(size);
+  fread(buf, 1, size, f);
+  fclose(f);
+
+  // Regular Font (20px)
+  unsigned char *bmp = malloc(512 * 512);
+  stbtt_BakeFontBitmap(buf, 0, 20.0, bmp, 512, 512, 32, 96, g_cdata);
+  g_font_tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_RGBA32,
+                                 SDL_TEXTUREACCESS_STATIC, 512, 512);
+  uint32_t *px = malloc(512 * 512 * 4);
+  for (int i = 0; i < 512 * 512; i++)
+    px[i] = (bmp[i] << 24) | 0xFFFFFF;
+  SDL_UpdateTexture(g_font_tex, NULL, px, 512 * 4);
+  SDL_SetTextureBlendMode(g_font_tex, SDL_BLENDMODE_BLEND);
+  free(bmp);
+  free(px);
+
+  // Header Font (64px) - Much Sharper
+  unsigned char *h_bmp = malloc(1024 * 1024);
+  stbtt_BakeFontBitmap(buf, 0, 64.0, h_bmp, 1024, 1024, 32, 96, g_hdata);
+  g_hdr_tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_RGBA32,
+                                SDL_TEXTUREACCESS_STATIC, 1024, 1024);
+  uint32_t *h_px = malloc(1024 * 1024 * 4);
+  for (int i = 0; i < 1024 * 1024; i++)
+    h_px[i] = (h_bmp[i] << 24) | 0xFFFFFF;
+  SDL_UpdateTexture(g_hdr_tex, NULL, h_px, 1024 * 4);
+  SDL_SetTextureBlendMode(g_hdr_tex, SDL_BLENDMODE_BLEND);
+  free(h_bmp);
+  free(h_px);
+
+  free(buf);
+  return RESULT_SUCCESS;
+}
+
+void render_text_scaled(SDL_Renderer *ren, const char *text, float x, float y,
+                        float scale, SDL_Color col) {
+  if (!g_font_tex || !text)
+    return;
+  SDL_SetTextureColorMod(g_font_tex, col.r, col.g, col.b);
+  float curr_x = x;
+  while (*text) {
+    if (*text >= 32 && *text < 128) {
+      stbtt_aligned_quad q;
+      float next_x = curr_x;
+      float next_y = y;
+      stbtt_GetBakedQuad(g_cdata, 512, 512, *text - 32, &next_x, &next_y, &q,
+                         1);
+
+      float w = (q.x1 - q.x0) * scale;
+      float h = (q.y1 - q.y0) * scale;
+      float dx = (q.x0 - curr_x) * scale;
+      float dy = (q.y0 - y) * scale;
+
+      SDL_Rect src = {(int)(q.s0 * 512), (int)(q.t0 * 512),
+                      (int)((q.s1 - q.s0) * 512), (int)((q.t1 - q.t0) * 512)};
+      SDL_Rect dst = {(int)(curr_x + dx), (int)(y + dy), (int)w, (int)h};
+      SDL_RenderCopy(ren, g_font_tex, &src, &dst);
+
+      curr_x += (next_x - curr_x) * scale;
+    }
+    text++;
+  }
+}
+
+void render_text(SDL_Renderer *ren, const char *text, float x, float y,
+                 SDL_Color col) {
+  render_text_scaled(ren, text, x, y, 1.0f, col);
+}
+
+void render_gradient_header(SDL_Renderer *ren, const char *text, int x, int y,
+                            SDL_Color c1, SDL_Color c2) {
+  if (!g_hdr_tex || !text)
+    return;
+  int len = strlen(text);
+  float curr_x = (float)x;
+  float curr_y = (float)y;
+  for (int i = 0; i < len; i++) {
+    float t = (float)i / (float)fmax(1, len - 1);
+    SDL_Color col = {(uint8_t)(c1.r + (c2.r - c1.r) * t),
+                     (uint8_t)(c1.g + (c2.g - c1.g) * t),
+                     (uint8_t)(c1.b + (c2.b - c1.b) * t), 255};
+    if (text[i] >= 32 && text[i] < 128) {
+      stbtt_aligned_quad q;
+      stbtt_GetBakedQuad(g_hdata, 1024, 1024, text[i] - 32, &curr_x, &curr_y,
+                         &q, 1);
+
+      SDL_Rect src = {(int)(q.s0 * 1024), (int)(q.t0 * 1024),
+                      (int)((q.s1 - q.s0) * 1024), (int)((q.t1 - q.t0) * 1024)};
+      SDL_Rect dst = {(int)q.x0, (int)q.y0, (int)(q.x1 - q.x0),
+                      (int)(q.y1 - q.y0)};
+
+      SDL_SetTextureColorMod(g_hdr_tex, col.r, col.g, col.b);
+      SDL_RenderCopy(ren, g_hdr_tex, &src, &dst);
+    }
+  }
+}
+
+void render_music_widget(SDL_Renderer *ren, int x, int y, int w, int h, int mx,
+                         int my) {
+  int r = 24;
+  int border_thickness = 4;
+
+  // Widget Shadow/Base
+  fill_rounded_rect_hq(ren, x, y, w, h, r, (SDL_Color){25, 25, 25, 255});
+
+  if (!g_player_running || !g_song_selected) {
+    render_text(ren, "No active song selected", x + 30, y + h / 2,
+                g_theme.text_dim);
+    draw_rounded_outline_hq(ren, x, y, w, h, r, 2,
+                            (SDL_Color){40, 40, 40, 255});
+    return;
+  }
+
+  SDL_Rect card_rect = {x, y, w, h};
+  if (g_art_cache.blurred) {
+    SDL_RenderSetClipRect(ren, &card_rect);
+    SDL_RenderCopy(ren, g_art_cache.blurred, NULL, &card_rect);
+    SDL_RenderSetClipRect(ren, NULL);
+  }
+
+  draw_rounded_mask_hq(ren, x, y, w, h, r, g_theme.bg);
+  draw_rounded_outline_hq(ren, x, y, w, h, r, border_thickness, g_theme.accent);
+
+  // Determine Layout based on Width (Stages)
+  bool show_text = (w > 200);
+  bool show_side_controls = (w > 600);
+
+  // Hover detection for artwork area
+  int art_size = h - 50;
+  SDL_Rect art_r = {x + 25, y + 25, art_size, art_size};
+  bool mouse_over_art = (mx >= art_r.x && mx <= art_r.x + art_r.w &&
+                         my >= art_r.y && my <= art_r.y + art_r.h);
+
+  if (g_art_cache.sharp) {
+    SDL_RenderCopy(ren, g_art_cache.sharp, NULL, &art_r);
+
+    // Play/Pause Overlay for Stage 2 & 3
+    if (!show_side_controls && mouse_over_art) {
+      SDL_SetRenderDrawColor(ren, 0, 0, 0, 80); // Lighter dim
+      SDL_RenderFillRect(ren, &art_r);
+
+      // Draw a glow or simple white button
+      SDL_Color btn_col = {255, 255, 255, 220};
+      draw_play_pause_button(ren, art_r.x + art_r.w / 2, art_r.y + art_r.h / 2,
+                             30, g_is_playing, btn_col);
+    }
+  }
+
+  if (show_text) {
+    float text_x = x + h + 10;
+    float text_y_top = y + h / 2 - 25;
+    float text_y_bot = y + h / 2 + 15;
+
+    // Fade text if width is getting small
+    uint8_t alpha = 255;
+    if (w < 350)
+      alpha = (uint8_t)((w - 200) * 255 / 150);
+
+    SDL_Color main_col = g_theme.text_main;
+    main_col.a = alpha;
+    SDL_Color dim_col = g_theme.text_dim;
+    dim_col.a = alpha;
+
+    render_text_scaled(ren, g_current_track.title, text_x, text_y_top, 1.2f,
+                       main_col);
+    render_text(ren, g_current_track.artist, text_x, text_y_bot, dim_col);
+  }
+
+  if (show_side_controls) {
+    draw_play_pause_button(ren, x + w - 70, y + h / 2, 30, g_is_playing,
+                           g_theme.accent);
+  }
+
+  // Drag handle (Top center bar, visible only when mouse is near)
+  SDL_Rect drag_bar = {x + w / 2 - 25, y + 8, 50, 4};
+  bool mouse_near_drag =
+      (mx > x + w / 2 - 60 && mx < x + w / 2 + 60 && my > y && my < y + 40);
+
+  if (mouse_near_drag || g_music_widget.is_dragging) {
+    fill_rounded_rect_hq(ren, drag_bar.x, drag_bar.y, drag_bar.w, drag_bar.h, 2,
+                         (SDL_Color){150, 150, 150, 200});
+  }
+
+  // Resize handle (right edge, thinner and inside)
+  if (g_music_widget_hover || g_music_widget.is_resizing) {
+    SDL_SetRenderDrawColor(ren, g_theme.accent.r, g_theme.accent.g,
+                           g_theme.accent.b, 200);
+    SDL_Rect handle = {x + w - 8, y + 40, 2, h - 80};
+    SDL_RenderFillRect(ren, &handle);
+  }
+}
+
+/* =========================================================================
+ * Main Application Loop
+ * ========================================================================= */
+
+int main(void) {
+  SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
+  SDL_Init(SDL_INIT_VIDEO);
+  SDL_Window *win =
+      SDL_CreateWindow("Harmony Hub", SDL_WINDOWPOS_CENTERED,
+                       SDL_WINDOWPOS_CENTERED, WINDOW_WIDTH, WINDOW_HEIGHT, 0);
+  SDL_Renderer *ren = SDL_CreateRenderer(
+      win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+  SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+  g_widget_tex = SDL_CreateTexture(ren, SDL_PIXELFORMAT_RGBA32,
+                                   SDL_TEXTUREACCESS_TARGET, 1200, 1200);
+  SDL_SetTextureBlendMode(g_widget_tex, SDL_BLENDMODE_BLEND);
+  init_font_system(ren);
+  load_hub_state();
+
+  void *z_ctx = zmq_ctx_new();
+  void *z_sock = zmq_socket(z_ctx, ZMQ_REP);
+  zmq_bind(z_sock, "ipc:///tmp/hub_socket.ipc");
+  g_z_cmd_sock = zmq_socket(z_ctx, ZMQ_PUB);
+  zmq_bind(g_z_cmd_sock, "ipc:///tmp/hub_cmd.ipc");
+
+  bool running = true;
+  SDL_Event e;
+  Uint32 last_check = 0;
+
+  while (running) {
+    Uint32 now = SDL_GetTicks();
+    if (now - last_check > 500) {
+      update_player_status();
+      if (!g_player_running) {
+        g_song_selected = false;
+        strcpy(g_current_track.title, "No active song");
+        strcpy(g_current_track.artist, "Unknown Artist");
+        g_current_track.art_path[0] = 0;
+      }
+      last_check = now;
+    }
+
+    while (SDL_PollEvent(&e)) {
+      if (e.type == SDL_QUIT)
+        running = false;
+      if (e.type == SDL_TEXTINPUT) {
+        strncat(g_search_query, e.text.text,
+                MAX_SONG_TITLE - strlen(g_search_query) - 1);
+        perform_search(g_search_query);
+      }
+      if (e.type == SDL_KEYDOWN) {
+        if (e.key.keysym.sym == SDLK_BACKSPACE && strlen(g_search_query) > 0) {
+          g_search_query[strlen(g_search_query) - 1] = 0;
+          perform_search(g_search_query);
+        }
+        if (e.key.keysym.sym == SDLK_ESCAPE)
+          g_sidebar_open = false;
+      }
+      if (e.type == SDL_MOUSEMOTION) {
+        g_mouse_x = e.motion.x;
+        g_mouse_y = e.motion.y;
+
+        // Hover detection for Music Widget
+        float wx = g_music_widget.x, wy = g_music_widget.y;
+        float ww = g_music_widget.w, wh = g_music_widget.h;
+        g_music_widget_hover = (g_mouse_x > wx && g_mouse_x < wx + ww &&
+                                g_mouse_y > wy && g_mouse_y < wy + wh);
+
+        if (g_music_widget.is_resizing) {
+          float new_w = g_mouse_x - g_music_widget.x;
+          if (new_w < 160)
+            new_w = 160;
+          if (new_w > 860)
+            new_w = 860;
+          g_music_widget.w = new_w;
+          g_music_widget.target_w = new_w;
+        }
+
+        if (g_music_widget.is_dragging) {
+          g_music_widget.x = (float)g_mouse_x - g_music_widget.drag_off_x;
+          g_music_widget.y = (float)g_mouse_y - g_music_widget.drag_off_y;
+          g_music_widget.target_x = g_music_widget.x;
+          g_music_widget.target_y = g_music_widget.y;
+        }
+      }
+      if (e.type == SDL_MOUSEBUTTONDOWN) {
+        if (e.button.x < 60 && e.button.y < 60)
+          g_sidebar_open = !g_sidebar_open;
+
+        // Widget Hit (Music Player)
+        float wx = g_music_widget.x, wy = g_music_widget.y;
+        float ww = g_music_widget.w, wh = g_music_widget.h;
+
+        if (e.button.x > wx && e.button.x < wx + ww && e.button.y > wy &&
+            e.button.y < wy + wh) {
+          // Check for Resize Handle (Right edge, 30px margin)
+          if (e.button.x > wx + ww - 30) {
+            g_music_widget.is_resizing = true;
+          } else {
+            // Check if clicking controls
+            bool show_side_controls = (ww > 600);
+            int btn_x, btn_y;
+            if (show_side_controls) {
+              btn_x = wx + ww - 70;
+              btn_y = wy + wh / 2;
+            } else {
+              btn_x = wx + 25 + (wh - 50) / 2;
+              btn_y = wy + 25 + (wh - 50) / 2;
+            }
+
+            int dist_sq = (e.button.x - btn_x) * (e.button.x - btn_x) +
+                          (e.button.y - btn_y) * (e.button.y - btn_y);
+            if (dist_sq < 35 * 35) {
+              g_is_playing = !g_is_playing;
+              send_player_command(g_is_playing ? "PLAY" : "PAUSE");
+            } else {
+              // Check for Drag Handle (Top center bar area)
+              SDL_Rect drag_area = {wx + ww / 2 - 40, wy, 80, 30};
+              if (e.button.x > drag_area.x &&
+                  e.button.x < drag_area.x + drag_area.w &&
+                  e.button.y > drag_area.y &&
+                  e.button.y < drag_area.y + drag_area.h) {
+                g_music_widget.is_dragging = true;
+                g_music_widget.drag_off_x = e.button.x - wx;
+                g_music_widget.drag_off_y = e.button.y - wy;
+              }
+            }
+          }
+        }
+
+        if (g_sidebar_open && e.button.x < SIDEBAR_WIDTH && e.button.y > 100 &&
+            e.button.y < 150) {
+          if (e.button.clicks == 2)
+            launch_player_process(NULL, false);
+          else if (!g_player_running)
+            launch_player_process(NULL, true);
+        }
+
+        if (e.button.x > 250 && e.button.x < 650 && e.button.y > 10 &&
+            e.button.y < 50) {
+          if (g_search_query[0] == '/' ||
+              (g_search_query[0] == '.' && g_search_query[1] == '/')) {
+            launch_player_process(g_search_query, true);
+            g_search_query[0] = 0;
+          }
+        }
+
+        if (g_result_count > 0 && e.button.x > 250 && e.button.x < 650 &&
+            e.button.y > 60) {
+          int i = (e.button.y - 65) / 50;
+          if (i >= 0 && i < g_result_count) {
+            launch_player_process(g_results[i].filepath, true);
+            g_search_query[0] = 0;
+            g_result_count = 0;
+          }
+        }
+      }
+      if (e.type == SDL_MOUSEBUTTONUP) {
+        if (g_music_widget.is_resizing) {
+          g_music_widget.is_resizing = false;
+          // Snap to stages
+          if (g_music_widget.w > 630)
+            g_music_widget.target_w = 860;
+          else if (g_music_widget.w > 280)
+            g_music_widget.target_w = 400;
+          else
+            g_music_widget.target_w = 160;
+        }
+        if (g_music_widget.is_dragging) {
+          g_music_widget.is_dragging = false;
+          // Snap back to the top-left home slot
+          g_music_widget.target_x = 20;
+          g_music_widget.target_y = 180;
+        }
+      }
+    }
+
+    // Smooth Transitions & Sway Physics
+    static float prev_x = 20.0f;
+
+    if (!g_music_widget.is_dragging) {
+      g_music_widget.x += (g_music_widget.target_x - g_music_widget.x) * 0.15f;
+      g_music_widget.y += (g_music_widget.target_y - g_music_widget.y) * 0.15f;
+    }
+    g_music_widget.w += (g_music_widget.target_w - g_music_widget.w) * 0.15f;
+    g_music_widget.h += (g_music_widget.target_h - g_music_widget.h) * 0.15f;
+
+    // Sway Physics (Rotation based on horizontal velocity)
+    float dx = g_music_widget.x - prev_x;
+    prev_x = g_music_widget.x;
+
+    g_music_widget.target_rotation =
+        dx * 1.8f; // Increased factor for more noticeable sway
+    if (g_music_widget.target_rotation > 12.0f)
+      g_music_widget.target_rotation = 12.0f;
+    if (g_music_widget.target_rotation < -12.0f)
+      g_music_widget.target_rotation = -12.0f;
+    g_music_widget.rotation +=
+        (g_music_widget.target_rotation - g_music_widget.rotation) * 0.12f;
+
+    char z_buf[MAX_LOG_LINE];
+    if (zmq_recv(z_sock, z_buf, sizeof(z_buf) - 1, ZMQ_DONTWAIT) > 0) {
+      char *t = strstr(z_buf, "title\": \"");
+      if (t) {
+        t += 9;
+        char *end = strchr(t, '\"');
+        if (end) {
+          int len = end - t;
+          strncpy(g_current_track.title, t, len);
+          g_current_track.title[len] = 0;
+          g_song_selected = true;
+        }
+      }
+      char *a = strstr(z_buf, "artist\": \"");
+      if (a) {
+        a += 10;
+        char *end = strchr(a, '\"');
+        if (end) {
+          int len = end - a;
+          strncpy(g_current_track.artist, a, len);
+          g_current_track.artist[len] = 0;
+        }
+      }
+      char *art = strstr(z_buf, "art_path\": \"");
+      if (art) {
+        art += 12;
+        char *end = strchr(art, '\"');
+        if (end) {
+          int len = end - art;
+          strncpy(g_current_track.art_path, art, len);
+          g_current_track.art_path[len] = 0;
+        }
+      }
+      char *st = strstr(z_buf, "state\": \"");
+      if (st)
+        g_is_playing = (strncmp(st + 9, "playing", 7) == 0);
+      char *col = strstr(z_buf, "theme_color\": \"");
+      if (col) {
+        col += 15;
+        if (col[0] == '#') {
+          unsigned int r_val, g_val, b_val;
+          if (sscanf(col + 1, "%02x%02x%02x", &r_val, &g_val, &b_val) == 3) {
+            g_theme.target_accent.r = r_val;
+            g_theme.target_accent.g = g_val;
+            g_theme.target_accent.b = b_val;
+          }
+        }
+      }
+      save_hub_state();
+      zmq_send(z_sock, "ACK", 3, 0);
+    }
+
+    if (g_song_selected)
+      update_art_cache(ren, g_current_track.art_path);
+
+    // Color interpolation
+    g_theme.accent.r += (g_theme.target_accent.r - g_theme.accent.r) * 0.05f;
+    g_theme.accent.g += (g_theme.target_accent.g - g_theme.accent.g) * 0.05f;
+    g_theme.accent.b += (g_theme.target_accent.b - g_theme.accent.b) * 0.05f;
+
+    if (g_sidebar_open && g_sidebar_anim < 1.0f)
+      g_sidebar_anim += 0.1f;
+    if (!g_sidebar_open && g_sidebar_anim > 0.0f)
+      g_sidebar_anim -= 0.1f;
+
+    SDL_SetRenderDrawColor(ren, g_theme.bg.r, g_theme.bg.g, g_theme.bg.b, 255);
+    SDL_RenderClear(ren);
+
+    // Welcome Header
+    SDL_Color h_col1 = {255, 255, 255, 255};
+    SDL_Color h_col2 = g_theme.accent;
+    render_gradient_header(ren, "Welcome Home", WINDOW_WIDTH / 2 - 180, 130,
+                           h_col1, h_col2);
+
+    // Grid System (WIDGETS)
+    if (g_player_running && g_music_widget.active) {
+      // 1. Render Widget to Texture
+      SDL_SetRenderTarget(ren, g_widget_tex);
+      SDL_SetRenderDrawColor(ren, 0, 0, 0, 0);
+      SDL_RenderClear(ren);
+
+      // Draw at 100,100 offset within texture to allow for rotation overflow
+      int off = 100;
+      int lmx = (g_mouse_x - (int)g_music_widget.x) + off;
+      int lmy = (g_mouse_y - (int)g_music_widget.y) + off;
+      render_music_widget(ren, off, off, (int)g_music_widget.w,
+                          (int)g_music_widget.h, lmx, lmy);
+
+      // 2. Render Texture to Screen with Rotation
+      SDL_SetRenderTarget(ren, NULL);
+      SDL_Rect src = {off - 50, off - 50, (int)g_music_widget.w + 100,
+                      (int)g_music_widget.h + 100};
+      SDL_Rect dst = {(int)g_music_widget.x - 50, (int)g_music_widget.y - 50,
+                      src.w, src.h};
+      SDL_Point center = {50 + (int)g_music_widget.w / 2,
+                          50 + (int)g_music_widget.h / 2};
+      SDL_RenderCopyEx(ren, g_widget_tex, &src, &dst,
+                       (double)g_music_widget.rotation, &center, SDL_FLIP_NONE);
+    }
+
+    // Top Bar (Drawn over grid if needed)
+    SDL_SetRenderDrawColor(ren, g_theme.top_bar.r, g_theme.top_bar.g,
+                           g_theme.top_bar.b, 255);
+    SDL_Rect top = {0, 0, WINDOW_WIDTH, 60};
+    SDL_RenderFillRect(ren, &top);
+    SDL_SetRenderDrawColor(ren, 255, 255, 255, 255);
+    for (int i = 0; i < 3; i++) {
+      SDL_Rect l = {20, 20 + i * 10, 30, 3};
+      SDL_RenderFillRect(ren, &l);
+    }
+    SDL_SetRenderDrawColor(ren, 40, 40, 40, 255);
+    SDL_Rect srch = {250, 10, 400, 40};
+    SDL_RenderFillRect(ren, &srch);
+    render_text(ren, strlen(g_search_query) ? g_search_query : "Search Shit...",
+                260, 35, g_theme.text_dim);
+
+    if (g_result_count > 0) {
+      SDL_SetRenderDrawColor(ren, 30, 30, 30, 240);
+      SDL_Rect res_bg = {250, 60, 400, g_result_count * 50};
+      SDL_RenderFillRect(ren, &res_bg);
+      for (int i = 0; i < g_result_count; i++)
+        render_text(ren, g_results[i].title, 265, 95 + i * 50,
+                    g_theme.text_main);
+    }
+
+    if (g_sidebar_anim > 0.01f) {
+      int sx = (int)((g_sidebar_anim - 1) * SIDEBAR_WIDTH);
+      SDL_SetRenderDrawColor(ren, 24, 24, 24, 255);
+      SDL_Rect sb = {sx, 0, SIDEBAR_WIDTH, WINDOW_HEIGHT};
+      SDL_RenderFillRect(ren, &sb);
+      render_text(ren, "Music Player", sx + 30, 120,
+                  g_player_running ? g_theme.text_main : g_theme.text_dim);
+    }
+
+    SDL_RenderPresent(ren);
+    SDL_Delay(16);
+  }
+
+  if (g_player_running)
+    send_player_command("QUIT");
+  if (g_player_pid > 0) {
+    kill(g_player_pid, SIGTERM);
+    waitpid(g_player_pid, NULL, 0);
+  }
+  zmq_close(z_sock);
+  zmq_close(g_z_cmd_sock);
+  zmq_ctx_destroy(z_ctx);
+  if (g_widget_tex)
+    SDL_DestroyTexture(g_widget_tex);
+  return 0;
+}

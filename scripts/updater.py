@@ -102,6 +102,14 @@ def main():
                     if repo_dir:
                         print("Building from source...", flush=True)
                         import subprocess
+                        import re
+                        player_h_path = os.path.join(repo_dir, "include", "core", "player.h")
+                        if os.path.exists(player_h_path):
+                            with open(player_h_path, "r") as f:
+                                content = f.read()
+                            content = re.sub(r'#define\s+HUB_VERSION\s+".*"', f'#define HUB_VERSION "{tag_name}"', content)
+                            with open(player_h_path, "w") as f:
+                                f.write(content)
                         # Run make clean to ensure any accidentally committed binaries are removed
                         subprocess.run(['make', 'clean'], cwd=repo_dir, capture_output=True)
                         # Run make inside the repo directory

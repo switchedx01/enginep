@@ -2210,15 +2210,14 @@ static void init_standard_paths(void) {
   }
 }
 
-static char g_hub_update_status[128] = "";
-
 static int hub_updater_thread_func(void *data) {
     (void)data;
     char cmd_buf[256];
     snprintf(cmd_buf, sizeof(cmd_buf), "python3 scripts/updater.py \"%s\"", HUB_VERSION);
+    show_toast_progress("Starting hub updater...", 0.1f);
     FILE *fp = popen(cmd_buf, "r");
     if (!fp) {
-        strncpy(g_hub_update_status, "Failed to start updater script", sizeof(g_hub_update_status) - 1);
+        show_toast("Failed to start updater script", 3000);
         return 0;
     }
     char line[128];
@@ -2226,10 +2225,15 @@ static int hub_updater_thread_func(void *data) {
         size_t len = strlen(line);
         if (len > 0 && line[len-1] == '\n') line[len-1] = '\0';
         if (len > 0) {
-            strncpy(g_hub_update_status, line, sizeof(g_hub_update_status) - 1);
+            show_toast_progress(line, -1.0f);
         }
     }
     pclose(fp);
+    
+    show_toast("Update process finished. Restarting...", 3000);
+    SDL_Delay(3000);
+    g_toast.active = false;
+    
     return 0;
 }
 
@@ -3215,13 +3219,8 @@ int main(void) {
             static uint32_t last_hub_upd_click = 0;
             if (SDL_GetTicks() - last_hub_upd_click > 1000) {
                 last_hub_upd_click = SDL_GetTicks();
-                strncpy(g_hub_update_status, "Starting hub updater...", sizeof(g_hub_update_status) - 1);
                 SDL_CreateThread(hub_updater_thread_func, "HubUpdaterThread", NULL);
             }
-        }
-
-        if (g_hub_update_status[0] != '\0') {
-            render_text_scaled(ren, g_hub_update_status, sx + 30, TOP_BAR_HEIGHT + 550, 0.8f, g_theme.accent);
         }
       }
     }
@@ -3365,6 +3364,7 @@ int main(void) {
     }
 
     SDL_RenderPresent(ren);
+    e.type = 0; // Clear stale event so it doesn't trigger UI repeatedly if no new events arrive
     if (g_should_quit) running = false;
     SDL_Delay(16);
   }

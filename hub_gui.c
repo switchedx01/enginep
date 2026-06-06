@@ -29,10 +29,11 @@
 #include <zmq.h>
 
 #define STB_TRUETYPE_IMPLEMENTATION
-#include "/mnt/mass-storage/Archive/Documents/dev/Harmony_Retooled/include/vendor/stb_truetype.h"
+#include "include/vendor/stb_truetype.h"
 #define STB_IMAGE_IMPLEMENTATION
-#include "/mnt/mass-storage/Archive/Documents/dev/Harmony_Retooled/include/utils/common.h"
-#include "/mnt/mass-storage/Archive/Documents/dev/Harmony_Retooled/include/vendor/stb_image.h"
+#include "include/core/player.h"
+#include "include/utils/common.h"
+#include "include/vendor/stb_image.h"
 
 /* =========================================================================
  * Constants & Configuration
@@ -43,11 +44,8 @@
 static int g_window_width = WINDOW_WIDTH;
 static int g_window_height = WINDOW_HEIGHT;
 #define SIDEBAR_WIDTH 250
-#define FONT_PATH                                                              \
-  "/mnt/mass-storage/Archive/Documents/dev/Harmony_Retooled/assets/fonts/"     \
-  "Roboto-Regular.ttf"
-#define DB_PATH                                                                \
-  "/mnt/mass-storage/Archive/Documents/dev/Harmony_Retooled/harmony_v2.db"
+static char g_font_path[MAX_PATH_LENGTH];
+static char g_db_path[MAX_PATH_LENGTH];
 #define MAX_RESULTS 5
 #define TOP_BAR_HEIGHT 60
 #define HEADER_HEIGHT 140
@@ -124,6 +122,7 @@ typedef struct {
   uint32_t start_time;
   uint32_t duration;
   bool active;
+  float progress; // -1.0 for standard toast
 } HubToast;
 // Cast server state
 static int g_cast_server_sock = -1;
@@ -248,6 +247,15 @@ void show_toast(const char *msg, uint32_t duration) {
   g_toast.start_time = SDL_GetTicks();
   g_toast.duration = duration;
   g_toast.active = true;
+  g_toast.progress = -1.0f;
+}
+
+void show_toast_progress(const char *msg, float progress) {
+  strncpy(g_toast.message, msg, 127);
+  g_toast.active = true;
+  g_toast.duration = 0; // Infinite until manually dismissed
+  g_toast.start_time = SDL_GetTicks(); // Refresh alpha
+  g_toast.progress = progress;
 }
 
 void show_modal(const char *title, const char *desc, const char *confirm, const char *cancel, bool danger, void (*on_conf)(void), void (*on_canc)(void));
@@ -491,7 +499,7 @@ Result perform_search(const char *query) {
   }
 
   sqlite3 *db;
-  if (sqlite3_open(DB_PATH, &db) != SQLITE_OK)
+  if (sqlite3_open(g_db_path, &db) != SQLITE_OK)
     return RESULT_ERROR_FILE_IO;
 
   const char *sql =
@@ -544,16 +552,13 @@ void launch_player_process(const char *filepath, bool headless) {
   show_toast(headless ? "Launching Background Player..." : "Launching Player UI...", 3000);
   g_player_pid = fork();
   if (g_player_pid == 0) {
-    const char *workdir =
-        "/mnt/mass-storage/Archive/Documents/dev/Harmony_Retooled";
-    if (chdir(workdir) != 0) {
-      perror("chdir failed");
-      exit(1);
-    }
-
     char *args[16];
     int i = 0;
-    args[i++] = "./harmony_player";
+    
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/.local/bin/harmony_player", getenv("HOME") ? getenv("HOME") : "/tmp");
+    
+    args[i++] = path;
     if (headless)
       args[i++] = "--headless";
     if (filepath)
@@ -565,7 +570,10 @@ void launch_player_process(const char *filepath, bool headless) {
     dup2(fd, STDERR_FILENO);
     close(fd);
 
-    execvp(args[0], args);
+    execv(path, args);
+    // Fallback if not in ~/.local/bin
+    args[0] = "harmony_player";
+    execvp("harmony_player", args);
     perror("execvp failed");
     exit(1);
   } else if (g_player_pid < 0) {
@@ -1307,7 +1315,7 @@ void init_orb_texture(SDL_Renderer *ren) {
 Result init_font_system(SDL_Renderer *ren) {
   long size;
   unsigned char *buf;
-  FILE *f = fopen(FONT_PATH, "rb");
+  FILE *f = fopen(g_font_path, "rb");
   if (!f)
     return RESULT_ERROR_FILE_IO;
   fseek(f, 0, SEEK_END);
@@ -2181,7 +2189,112 @@ static void validate_widget_positions(void) {
       SDL_SetTextureAlphaMod(g_widget_tex, 255); \
     } while (0)
 
+static void init_standard_paths(void) {
+  const char *home = getenv("HOME");
+  if (!home) home = "/tmp";
+  
+  char base_path[MAX_PATH_LENGTH];
+  snprintf(base_path, sizeof(base_path), "%s/.local/share/harmony_player", home);
+  
+  struct stat st = {0};
+  if (stat(base_path, &st) == -1) {
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd), "mkdir -p \"%s\"", base_path);
+    system(cmd);
+  }
+  
+  snprintf(g_db_path, sizeof(g_db_path), "%s/harmony_v2.db", base_path);
+  snprintf(g_font_path, sizeof(g_font_path), "%s/assets/fonts/Roboto-Regular.ttf", base_path);
+  if (access(g_font_path, F_OK) != 0) {
+      snprintf(g_font_path, sizeof(g_font_path), "/mnt/mass-storage/Archive/Documents/dev/Harmony_Retooled/assets/fonts/Roboto-Regular.ttf");
+  }
+}
+
+static char g_hub_update_status[128] = "";
+
+static int hub_updater_thread_func(void *data) {
+    (void)data;
+    char cmd_buf[256];
+    snprintf(cmd_buf, sizeof(cmd_buf), "python3 scripts/updater.py \"%s\"", HUB_VERSION);
+    FILE *fp = popen(cmd_buf, "r");
+    if (!fp) {
+        strncpy(g_hub_update_status, "Failed to start updater script", sizeof(g_hub_update_status) - 1);
+        return 0;
+    }
+    char line[128];
+    while (fgets(line, sizeof(line), fp)) {
+        size_t len = strlen(line);
+        if (len > 0 && line[len-1] == '\n') line[len-1] = '\0';
+        if (len > 0) {
+            strncpy(g_hub_update_status, line, sizeof(g_hub_update_status) - 1);
+        }
+    }
+    pclose(fp);
+    return 0;
+}
+
+static int install_thread_func(void *data) {
+    (void)data;
+    show_toast_progress("Preparing installation...", 0.1f);
+    system("mkdir -p /tmp/harmony_build");
+    
+    show_toast_progress("Cloning Harmony_Retooled...", 0.3f);
+    system("cd /tmp/harmony_build && rm -rf Harmony_Retooled && git clone https://github.com/switchedx01/Harmony_Retooled.git");
+    
+    show_toast_progress("Compiling from source...", 0.6f);
+    system("cd /tmp/harmony_build/Harmony_Retooled && make -j$(nproc)");
+    
+    show_toast_progress("Installing binaries...", 0.9f);
+    system("cd /tmp/harmony_build/Harmony_Retooled && ./install.sh");
+    
+    show_toast_progress("Installation complete!", 1.0f);
+    SDL_Delay(3000);
+    g_toast.active = false;
+    
+    return 0;
+}
+
+static void on_install_confirm(void) {
+  g_modal.active = false;
+  SDL_CreateThread(install_thread_func, "InstallThread", NULL);
+}
+
+static void on_install_cancel(void) {
+  g_modal.active = false;
+  show_toast("Installation canceled.", 3000);
+}
+
+static void on_uninstall_confirm(void) {
+  g_modal.active = false;
+  char path[1024];
+  snprintf(path, sizeof(path), "%s/.local/bin/harmony_player", getenv("HOME") ? getenv("HOME") : "/tmp");
+  unlink(path);
+  show_toast("Harmony Player uninstalled successfully.", 3000);
+}
+
+static void on_uninstall_cancel(void) {
+  g_modal.active = false;
+}
+
+static bool is_player_installed(void) {
+  char path[1024];
+  snprintf(path, sizeof(path), "%s/.local/bin/harmony_player", getenv("HOME") ? getenv("HOME") : "/tmp");
+  if (access(path, X_OK) == 0) return true;
+  if (system("which harmony_player > /dev/null 2>&1") == 0) return true;
+  return false;
+}
+
+static bool check_player_installation(void) {
+  if (!is_player_installed()) {
+      show_modal("Player Not Found", "The Harmony Player is not installed on this system. Would you like to download and install it from GitHub?", "Install", "Cancel", false, on_install_confirm, on_install_cancel);
+      return false;
+  }
+  return true;
+}
+
 int main(void) {
+  init_standard_paths();
+  setenv("HARMONY_ENGINE", "1", 1);
   SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
   SDL_Init(SDL_INIT_VIDEO);
   SDL_Window *win =
@@ -2286,12 +2399,17 @@ int main(void) {
       last_check = now;
     }
 
-    while (SDL_PollEvent(&e)) {
-      if (e.type == SDL_QUIT) {
-        show_modal("Exit Harmony Hub?", 
-                   "This will stop the hub and the background music process. Any unsaved playback state will be lost.", 
-                   "Quit & Stop", "Cancel", true, quit_action, cancel_quit);
-      }
+      while (SDL_PollEvent(&e)) {
+        if (e.type == SDL_QUIT) {
+            if (g_toast.active && g_toast.duration == 0) {
+               // Show temporary message on top of the progress bar
+               show_toast("Installation in progress, please wait.", 3000);
+            } else {
+               show_modal("Exit Harmony Hub?", 
+                          "This will stop the hub and the background music process. Any unsaved playback state will be lost.", 
+                          "Quit & Stop", "Cancel", true, quit_action, cancel_quit);
+            }
+        }
       
       if (g_modal.active) {
         if (e.type == SDL_MOUSEBUTTONDOWN) {
@@ -2674,10 +2792,12 @@ int main(void) {
             bool term_hover = g_player_running && (e.button.x > SIDEBAR_WIDTH - 15 - 95 && e.button.x < SIDEBAR_WIDTH - 15 &&
                                                    e.button.y > TOP_BAR_HEIGHT + 130 && e.button.y < TOP_BAR_HEIGHT + 180);
             if (!term_hover) {
-              if (e.button.clicks == 2)
-                launch_player_process(NULL, false);
-              else if (!g_player_running)
-                launch_player_process(NULL, true);
+              if (check_player_installation()) {
+                if (e.button.clicks == 2)
+                  launch_player_process(NULL, false);
+                else if (!g_player_running)
+                  launch_player_process(NULL, true);
+              }
             }
           }
         }
@@ -3043,13 +3163,66 @@ int main(void) {
            clear_privacy_data();
         }
 
+        // Player Management Section
+        render_text(ren, "Player Management", sx + 30, TOP_BAR_HEIGHT + 270, g_theme.text_main);
+
+        bool installed = is_player_installed();
+
+        // Update/Install Button
+        SDL_Rect upd_btn = {sx + 30, TOP_BAR_HEIGHT + 300, 190, 42};
+        bool hov_upd = (g_mouse_x > upd_btn.x && g_mouse_x < upd_btn.x + upd_btn.w &&
+                         g_mouse_y > upd_btn.y && g_mouse_y < upd_btn.y + upd_btn.h);
+        fill_rounded_rect_hq(ren, upd_btn.x, upd_btn.y, upd_btn.w, upd_btn.h, 10,
+                             hov_upd ? (SDL_Color){0, 180, 220, 255} : (SDL_Color){0, 140, 180, 255});
+        render_text_scaled(ren, installed ? "Update Player" : "Install Player", upd_btn.x + 35, upd_btn.y + 26, 0.9f, (SDL_Color){255, 255, 255, 255});
+        
+        if (hov_upd && (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT)) {
+           SDL_CreateThread(install_thread_func, "InstallThread", NULL);
+        }
+
+        if (installed) {
+            // Uninstall Button
+            SDL_Rect un_btn = {sx + 30, TOP_BAR_HEIGHT + 355, 190, 42};
+            bool hov_un = (g_mouse_x > un_btn.x && g_mouse_x < un_btn.x + un_btn.w &&
+                             g_mouse_y > un_btn.y && g_mouse_y < un_btn.y + un_btn.h);
+            fill_rounded_rect_hq(ren, un_btn.x, un_btn.y, un_btn.w, un_btn.h, 10,
+                                 hov_un ? (SDL_Color){220, 60, 60, 255} : (SDL_Color){180, 40, 40, 255});
+            render_text_scaled(ren, "Uninstall Player", un_btn.x + 30, un_btn.y + 26, 0.9f, (SDL_Color){255, 255, 255, 255});
+            
+            if (hov_un && (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT)) {
+               show_modal("Uninstall Player?", "Are you sure you want to uninstall Harmony Player? Your database and settings will remain.", "Uninstall", "Cancel", true, on_uninstall_confirm, on_uninstall_cancel);
+            }
+        }
+
         // About Section
         SDL_SetRenderDrawColor(ren, 40, 40, 40, 255);
-        SDL_RenderDrawLine(ren, sx + 25, TOP_BAR_HEIGHT + 275, sx + SIDEBAR_WIDTH - 25, TOP_BAR_HEIGHT + 275);
-        render_text(ren, "About Harmony", sx + 30, TOP_BAR_HEIGHT + 310, g_theme.text_main);
-        render_text_scaled(ren, "Version 2.1.0-alpha", sx + 30, TOP_BAR_HEIGHT + 340, 0.85f, g_theme.text_dim);
-        render_text_scaled(ren, "Research Preview", sx + 30, TOP_BAR_HEIGHT + 360, 0.85f, g_theme.text_dim);
-        render_text_scaled(ren, "Built with ZMQ & SDL2", sx + 30, TOP_BAR_HEIGHT + 380, 0.85f, g_theme.text_dim);
+        SDL_RenderDrawLine(ren, sx + 25, TOP_BAR_HEIGHT + 420, sx + SIDEBAR_WIDTH - 25, TOP_BAR_HEIGHT + 420);
+        render_text(ren, "About Harmony", sx + 30, TOP_BAR_HEIGHT + 445, g_theme.text_main);
+        
+        char version_str[128];
+        snprintf(version_str, sizeof(version_str), "Version %s", HUB_VERSION);
+        render_text_scaled(ren, version_str, sx + 30, TOP_BAR_HEIGHT + 475, 0.85f, g_theme.text_dim);
+
+        // Update Hub Button
+        SDL_Rect hub_upd_btn = {sx + 30, TOP_BAR_HEIGHT + 495, 190, 36};
+        bool hov_hub_upd = (g_mouse_x > hub_upd_btn.x && g_mouse_x < hub_upd_btn.x + hub_upd_btn.w &&
+                            g_mouse_y > hub_upd_btn.y && g_mouse_y < hub_upd_btn.y + hub_upd_btn.h);
+        fill_rounded_rect_hq(ren, hub_upd_btn.x, hub_upd_btn.y, hub_upd_btn.w, hub_upd_btn.h, 10,
+                             hov_hub_upd ? (SDL_Color){0, 180, 220, 255} : (SDL_Color){0, 140, 180, 255});
+        render_text_scaled(ren, "Update Hub", hub_upd_btn.x + 45, hub_upd_btn.y + 24, 0.9f, (SDL_Color){255, 255, 255, 255});
+        
+        if (hov_hub_upd && (e.type == SDL_MOUSEBUTTONDOWN && e.button.button == SDL_BUTTON_LEFT)) {
+            static uint32_t last_hub_upd_click = 0;
+            if (SDL_GetTicks() - last_hub_upd_click > 1000) {
+                last_hub_upd_click = SDL_GetTicks();
+                strncpy(g_hub_update_status, "Starting hub updater...", sizeof(g_hub_update_status) - 1);
+                SDL_CreateThread(hub_updater_thread_func, "HubUpdaterThread", NULL);
+            }
+        }
+
+        if (g_hub_update_status[0] != '\0') {
+            render_text_scaled(ren, g_hub_update_status, sx + 30, TOP_BAR_HEIGHT + 550, 0.8f, g_theme.accent);
+        }
       }
     }
 
@@ -3105,20 +3278,31 @@ int main(void) {
     // 8. Toast Notifications (System Transparency)
     if (g_toast.active) {
       uint32_t elapsed = SDL_GetTicks() - g_toast.start_time;
-      if (elapsed > g_toast.duration) {
+      if (g_toast.duration > 0 && elapsed > g_toast.duration) {
         g_toast.active = false;
       } else {
         float alpha = 1.0f;
-        if (elapsed > g_toast.duration - 500) alpha = (g_toast.duration - elapsed) / 500.0f;
-        if (elapsed < 500) alpha = elapsed / 500.0f;
+        if (g_toast.duration > 0 && elapsed > g_toast.duration - 500) alpha = (g_toast.duration - elapsed) / 500.0f;
+        if (g_toast.duration > 0 && elapsed < 500) alpha = elapsed / 500.0f;
         
-        int tw = 350, th = 50;
+        // Progress toast doesn't fade immediately
+        if (g_toast.duration == 0) alpha = 1.0f;
+
+        int tw = 350, th = (g_toast.progress >= 0.0f) ? 65 : 50;
         int tx = (g_window_width - tw) / 2;
-        int ty = g_window_height - 80;
+        int ty = g_window_height - 90;
         SDL_Color t_bg = {40, 40, 40, (uint8_t)(230 * alpha)};
         fill_rounded_rect_hq(ren, tx, ty, tw, th, 12, t_bg);
+        
         SDL_Color t_txt = {255, 255, 255, (uint8_t)(255 * alpha)};
-        render_text(ren, g_toast.message, tx + 20, ty + 32, t_txt);
+        render_text(ren, g_toast.message, tx + 20, ty + 28, t_txt);
+        
+        if (g_toast.progress >= 0.0f) {
+            SDL_Color pbg = {80, 80, 80, (uint8_t)(255 * alpha)};
+            SDL_Color pfg = {0, 220, 255, (uint8_t)(255 * alpha)};
+            fill_rounded_rect_hq(ren, tx + 20, ty + 45, tw - 40, 6, 3, pbg);
+            fill_rounded_rect_hq(ren, tx + 20, ty + 45, (tw - 40) * g_toast.progress, 6, 3, pfg);
+        }
       }
     }
 

@@ -44,16 +44,9 @@ void launch_player_process(HubContext *hub, const char *filepath,
   hub->player_pid = fork();
   if (hub->player_pid == 0) {
     /* Child process */
-    const char *workdir =
-        "/mnt/mass-storage/Archive/Documents/dev/Harmony_Retooled";
-    if (chdir(workdir) != 0) {
-      perror("chdir failed");
-      exit(1);
-    }
-
     char *args[16];
     int i = 0;
-    args[i++] = "./harmony_player";
+    args[i++] = "harmony_player";
     if (headless)
       args[i++] = "--headless";
     if (filepath)

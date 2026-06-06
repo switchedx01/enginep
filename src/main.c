@@ -8,8 +8,10 @@
 #include "init.h"
 #include "input_handler.h"
 #include "zmq_transport.h"
+#include <stdlib.h>
 
 int main(void) {
+  setenv("HARMONY_ENGINE", "1", 1);
   HubContext hub_instance;
   hub_context_init_defaults(&hub_instance);
   HubContext *hub = &hub_instance;

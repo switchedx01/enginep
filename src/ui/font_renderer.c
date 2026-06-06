@@ -16,7 +16,15 @@ Result font_renderer_init(SDL_Renderer *ren, FontRenderer *fr) {
   
   long size;
   unsigned char *buf;
-  FILE *f = fopen(HUB_FONT_PATH, "rb");
+  FILE *f = NULL;
+  if (!f) {
+      char path[1024];
+      snprintf(path, sizeof(path), "%s/.local/share/harmony_player/assets/fonts/Roboto-Regular.ttf", getenv("HOME") ? getenv("HOME") : "/tmp");
+      f = fopen(path, "rb");
+  }
+  if (!f) {
+      f = fopen("/mnt/mass-storage/Archive/Documents/dev/Harmony_Retooled/assets/fonts/Roboto-Regular.ttf", "rb");
+  }
   if (!f)
     return RESULT_ERROR_FILE_IO;
 

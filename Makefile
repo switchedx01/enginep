@@ -27,14 +27,19 @@ SRCS = src/main.c \
 BUILD_DIR = build
 OBJS = $(SRCS:src/%.c=build/%.o)
 TARGET = harmony_hub
+GUI_TARGET = hub_gui
 
 .PHONY: all clean
 
-all: $(TARGET)
+all: $(TARGET) $(GUI_TARGET)
 
 $(TARGET): $(OBJS)
 	$(CC) $(OBJS) -o $@ $(LDFLAGS)
 	@echo "Build successful: $(TARGET)"
+
+$(GUI_TARGET): hub_gui.c
+	$(CC) $< -o $@ $(CFLAGS) $(LDFLAGS)
+	@echo "Build successful: $(GUI_TARGET)"
 
 build/%.o: src/%.c
 	@mkdir -p $(dir $@)

@@ -1,5 +1,5 @@
-#ifndef VENDOR_COMMON_H
-#define VENDOR_COMMON_H
+#ifndef UTILS_COMMON_H
+#define UTILS_COMMON_H
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -8,20 +8,15 @@
 /* P10 Rule 8: Limited Preprocessor. Only includes and simple macros. */
 /* P10 Rule 5: Assertion Density. Recovery action must be taken. */
 
-/* Debugging function prototype (implemented in hub_context.c) */
+/* Debugging function prototype (implemented in logging.c) */
 void tst_debugging(const char *format, const char *file, int line,
                    const char *expr);
 
 /* P10 Assertion Macro */
-static inline bool _c_assert_impl(bool cond, const char* file, int line, const char* expr) {
-    if (!cond) {
-        tst_debugging("Assertion failed", file, line, expr);
-        return false;
-    }
-    return true;
-}
-
-#define c_assert(e) _c_assert_impl((e), __FILE__, __LINE__, #e)
+/* Usage: if (!c_assert(condition)) { return ERROR_CODE; } */
+#define c_assert(e)                                                            \
+  ((e) ? (true)                                                                \
+       : (tst_debugging("Assertion failed", __FILE__, __LINE__, #e), false))
 
 /* Standard Return Codes */
 typedef enum {
@@ -34,6 +29,16 @@ typedef enum {
   RESULT_ERROR_NOT_IMPLEMENTED = -6,
   RESULT_ERROR_OUT_OF_MEMORY = -7
 } Result;
+
+/* Max Constraints for Static Allocation (P10 Rule 3) */
+#define MAX_PATH_LENGTH 1024
+#define MAX_LOG_LINE 1024
+#define MAX_PLAYLIST_SIZE 1000
+#define MAX_SONG_TITLE 256
+
+/* Layout Constants */
+#define SIDEBAR_W 280
+#define CONTROL_BAR_H 100
 
 /* P10 Rule 7: Strict Interface Validation Macros */
 #define VALIDATE_PTR_OR_RETURN(ptr, ret)                                       \
@@ -48,11 +53,6 @@ typedef enum {
     return (res);                                                              \
   }
 
-/* Max Constraints for Static Allocation (P10 Rule 3) */
-#define MAX_PATH_LENGTH 1024
-#define MAX_LOG_LINE 1024
-#define MAX_SONG_TITLE 256
-
 /* Hub-specific Constants */
 #define HUB_WINDOW_WIDTH 900
 #define HUB_WINDOW_HEIGHT 600
@@ -62,4 +62,4 @@ typedef enum {
   "/mnt/mass-storage/Archive/Documents/dev/Harmony_Retooled/harmony_v2.db"
 #define HUB_FONT_PATH "assets/fonts/Roboto-Regular.ttf"
 
-#endif /* VENDOR_COMMON_H */
+#endif /* UTILS_COMMON_H */

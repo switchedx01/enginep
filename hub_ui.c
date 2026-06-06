@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 #define WINDOW_WIDTH 900
 #define WINDOW_HEIGHT 600
@@ -173,6 +174,7 @@ void render() {
 }
 
 int main(int argc, char *argv[]) {
+    setenv("HARMONY_ENGINE", "1", 1);
     if (SDL_Init(SDL_INIT_VIDEO) < 0) return 1;
     if (TTF_Init() < 0) return 1;
 

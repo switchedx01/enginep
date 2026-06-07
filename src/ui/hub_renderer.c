@@ -99,22 +99,55 @@ void hub_render(HubContext *hub) {
   }
 
   /* Search bar */
-  SDL_SetRenderDrawColor(ren, 40, 40, 40, 255);
-  SDL_Rect srch = {250, 10, 400, 40};
-  SDL_RenderFillRect(ren, &srch);
-  render_text(ren, &hub->font_renderer,
-              strlen(hub->search_query) ? hub->search_query
-                                        : "Search Harmony...",
-              260, 35, hub->theme.text_dim);
+  SDL_Rect srch;
+  if (hub->search_active) {
+    srch = (SDL_Rect){80, 10, HUB_WINDOW_WIDTH - 100, 40};
+    fill_rounded_rect_hq(ren, srch.x, srch.y, srch.w, srch.h, 20, (SDL_Color){50, 50, 50, 255});
+    draw_rounded_outline_hq(ren, srch.x, srch.y, srch.w, srch.h, 20, 2, hub->theme.accent);
+  } else {
+    srch = (SDL_Rect){250, 10, 400, 40};
+    fill_rounded_rect_hq(ren, srch.x, srch.y, srch.w, srch.h, 8, (SDL_Color){40, 40, 40, 255});
+  }
 
-  /* Search results dropdown */
-  if (hub->result_count > 0) {
-    SDL_SetRenderDrawColor(ren, 30, 30, 30, 240);
-    SDL_Rect res_bg = {250, 60, 400, hub->result_count * 50};
-    SDL_RenderFillRect(ren, &res_bg);
-    for (int i = 0; i < hub->result_count; i++)
-      render_text(ren, &hub->font_renderer, hub->results[i].title, 265, 95 + i * 50,
-                  hub->theme.text_main);
+  char display_query[MAX_SONG_TITLE + 2];
+  if (strlen(hub->search_query) > 0) {
+    snprintf(display_query, sizeof(display_query), "%s%s", hub->search_query, hub->search_active && (SDL_GetTicks() % 1000 < 500) ? "|" : "");
+  } else {
+    snprintf(display_query, sizeof(display_query), "%s", hub->search_active && (SDL_GetTicks() % 1000 < 500) ? "|" : "Search (a: artist, s: song, p: album)");
+  }
+
+  render_text(ren, &hub->font_renderer,
+              display_query,
+              srch.x + 15, 35, strlen(hub->search_query) ? hub->theme.text_main : hub->theme.text_dim);
+
+  /* Search results dropdown / overlay */
+  if (hub->search_active) {
+    /* Dim main area */
+    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(ren, 10, 10, 10, 200);
+    SDL_Rect overlay = {0, 60, HUB_WINDOW_WIDTH, HUB_WINDOW_HEIGHT - 60};
+    SDL_RenderFillRect(ren, &overlay);
+    SDL_SetRenderDrawBlendMode(ren, SDL_BLENDMODE_NONE);
+
+    if (hub->result_count > 0) {
+      for (int i = 0; i < hub->result_count; i++) {
+        int y_pos = 80 + i * 70;
+        
+        /* Row hover/background */
+        SDL_Rect row = {40, y_pos, HUB_WINDOW_WIDTH - 80, 60};
+        if (hub->mouse_x > row.x && hub->mouse_x < row.x + row.w &&
+            hub->mouse_y > row.y && hub->mouse_y < row.y + row.h) {
+          fill_rounded_rect_hq(ren, row.x, row.y, row.w, row.h, 8, (SDL_Color){255, 255, 255, 20});
+        }
+        
+        /* Draw title and artist */
+        render_text(ren, &hub->font_renderer, hub->results[i].title, row.x + 15, y_pos + 25, hub->theme.text_main);
+        render_text(ren, &hub->font_renderer, hub->results[i].artist, row.x + 15, y_pos + 45, hub->theme.text_dim);
+      }
+    }
+  } else if (hub->result_count > 0 && strlen(hub->search_query) > 0) {
+    /* Clear results when inactive */
+    hub->result_count = 0;
   }
 
   /* Sidebar */

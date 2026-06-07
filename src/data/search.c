@@ -20,11 +20,28 @@ Result perform_search(const char *query, SearchResult *results, int *count) {
   if (sqlite3_open(HUB_DB_PATH, &db) != SQLITE_OK)
     return RESULT_ERROR_FILE_IO;
 
-  const char *sql =
+  const char *base_query =
       "SELECT t.title, a.name, t.filepath, al.art_filename FROM tracks t "
       "LEFT JOIN artists a ON t.artist_id = a.id "
-      "LEFT JOIN albums al ON t.album_id = al.id "
-      "WHERE t.title LIKE ? LIMIT ?;";
+      "LEFT JOIN albums al ON t.album_id = al.id ";
+
+  char sql[512];
+  const char *clean_query = query;
+  bool is_default = false;
+
+  if (strncmp(query, "a:", 2) == 0) {
+    snprintf(sql, sizeof(sql), "%s WHERE a.name LIKE ? LIMIT ?;", base_query);
+    clean_query = query + 2;
+  } else if (strncmp(query, "s:", 2) == 0) {
+    snprintf(sql, sizeof(sql), "%s WHERE t.title LIKE ? LIMIT ?;", base_query);
+    clean_query = query + 2;
+  } else if (strncmp(query, "p:", 2) == 0) {
+    snprintf(sql, sizeof(sql), "%s WHERE al.title LIKE ? LIMIT ?;", base_query);
+    clean_query = query + 2;
+  } else {
+    snprintf(sql, sizeof(sql), "%s WHERE t.title LIKE ? OR a.name LIKE ? LIMIT ?;", base_query);
+    is_default = true;
+  }
       
   sqlite3_stmt *stmt;
   if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
@@ -33,9 +50,16 @@ Result perform_search(const char *query, SearchResult *results, int *count) {
   }
 
   char pattern[MAX_SONG_TITLE + 2];
-  snprintf(pattern, sizeof(pattern), "%%%s%%", query);
-  sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_STATIC);
-  sqlite3_bind_int(stmt, 2, HUB_MAX_SEARCH_RESULTS);
+  snprintf(pattern, sizeof(pattern), "%%%s%%", clean_query);
+  
+  if (is_default) {
+    sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, pattern, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 3, HUB_MAX_SEARCH_RESULTS);
+  } else {
+    sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 2, HUB_MAX_SEARCH_RESULTS);
+  }
 
   int found_count = 0;
   while (sqlite3_step(stmt) == SQLITE_ROW && found_count < HUB_MAX_SEARCH_RESULTS) {

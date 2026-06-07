@@ -184,6 +184,7 @@ static bool g_is_transitioning = false;
 static bool g_sidebar_open = false;
 static float g_sidebar_anim = 0.0f;
 static char g_search_query[MAX_SONG_TITLE] = "";
+static bool g_search_active = false;
 static SearchResult g_current_track = {"No active song", "Unknown Artist", "", "", 0.0f, 0.0f};
 static bool g_player_running = false;
 static bool g_song_selected = false;
@@ -228,6 +229,10 @@ static float g_pill_rotation = 0.0f;
 static bool g_pill_hover = false;
 static SDL_Texture *g_cd_tex = NULL; // Offscreen circular CD compositing texture
 
+static inline bool is_music_widget_visible() {
+    return g_music_widget.active && (g_current_tab == TAB_HOME || g_current_tab == TAB_MUSIC || g_music_widget.is_maximized);
+}
+
 // --- Pill Fullscreen Overlay (completely independent from grid widget) ---
 typedef struct {
     bool active;          // Is the overlay alive (animating or showing)?
@@ -239,6 +244,8 @@ static PillFullscreen g_pill_fs = {0};
 static int g_mouse_x, g_mouse_y;
 
 static bool g_settings_open = false;
+static bool g_config_open = false;
+static bool g_grid_locked = true;
 static HubToast g_toast = {0};
 static HubModal g_modal = {0};
 
@@ -502,17 +509,42 @@ Result perform_search(const char *query) {
   if (sqlite3_open(g_db_path, &db) != SQLITE_OK)
     return RESULT_ERROR_FILE_IO;
 
-  const char *sql =
+  const char *base_query =
       "SELECT t.title, a.name, t.filepath, al.art_filename FROM tracks t "
       "LEFT JOIN artists a ON t.artist_id = a.id "
-      "LEFT JOIN albums al ON t.album_id = al.id "
-      "WHERE t.title LIKE ? LIMIT ?;";
+      "LEFT JOIN albums al ON t.album_id = al.id ";
+      
+  char sql[512];
+  const char *clean_query = query;
+  bool is_default = false;
+
+  if (strncmp(query, "a:", 2) == 0) {
+    snprintf(sql, sizeof(sql), "%s WHERE a.name LIKE ? LIMIT ?;", base_query);
+    clean_query = query + 2;
+  } else if (strncmp(query, "s:", 2) == 0) {
+    snprintf(sql, sizeof(sql), "%s WHERE t.title LIKE ? LIMIT ?;", base_query);
+    clean_query = query + 2;
+  } else if (strncmp(query, "p:", 2) == 0) {
+    snprintf(sql, sizeof(sql), "%s WHERE al.title LIKE ? LIMIT ?;", base_query);
+    clean_query = query + 2;
+  } else {
+    snprintf(sql, sizeof(sql), "%s WHERE t.title LIKE ? OR a.name LIKE ? LIMIT ?;", base_query);
+    is_default = true;
+  }
+
   sqlite3_stmt *stmt;
   sqlite3_prepare_v2(db, sql, -1, &stmt, NULL);
   char pattern[MAX_SONG_TITLE + 2];
-  snprintf(pattern, sizeof(pattern), "%%%s%%", query);
-  sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_STATIC);
-  sqlite3_bind_int(stmt, 2, MAX_RESULTS);
+  snprintf(pattern, sizeof(pattern), "%%%s%%", clean_query);
+  
+  if (is_default) {
+    sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_STATIC);
+    sqlite3_bind_text(stmt, 2, pattern, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 3, MAX_RESULTS);
+  } else {
+    sqlite3_bind_text(stmt, 1, pattern, -1, SQLITE_STATIC);
+    sqlite3_bind_int(stmt, 2, MAX_RESULTS);
+  }
 
   g_result_count = 0;
   while (sqlite3_step(stmt) == SQLITE_ROW && g_result_count < MAX_RESULTS) {
@@ -2453,17 +2485,21 @@ int main(void) {
         }
       }
       if (e.type == SDL_TEXTINPUT) {
+        g_search_active = true;
         strncat(g_search_query, e.text.text,
                 MAX_SONG_TITLE - strlen(g_search_query) - 1);
         perform_search(g_search_query);
       }
       if (e.type == SDL_KEYDOWN) {
         if (e.key.keysym.sym == SDLK_BACKSPACE && strlen(g_search_query) > 0) {
+          g_search_active = true;
           g_search_query[strlen(g_search_query) - 1] = 0;
           perform_search(g_search_query);
         }
-        if (e.key.keysym.sym == SDLK_ESCAPE)
+        if (e.key.keysym.sym == SDLK_ESCAPE) {
           g_sidebar_open = false;
+          g_search_active = false;
+        }
         if (e.key.keysym.sym == SDLK_RETURN && strlen(g_search_query) > 0) {
            perform_search(g_search_query);
         }
@@ -2491,10 +2527,10 @@ int main(void) {
             uy = tx * s + ty * c + cy;
         }
 
-        g_music_widget_hover = (ux > wx && ux < wx + ww &&
+        g_music_widget_hover = is_music_widget_visible() && (ux > wx && ux < wx + ww &&
                                 uy > wy && uy < wy + wh);
 
-        if (g_music_widget.is_resizing) {
+        if (is_music_widget_visible() && g_music_widget.is_resizing) {
           float new_w = g_mouse_x - g_music_widget.x;
           if (new_w < 160)
             new_w = 160;
@@ -2507,12 +2543,16 @@ int main(void) {
         if (g_music_widget.is_dragging) {
           float dx = (float)g_mouse_x - g_music_widget.drag_off_x - g_music_widget.x;
           float dy = (float)g_mouse_y - g_music_widget.drag_off_y - g_music_widget.y;
-          if (dx*dx + dy*dy > 25) g_music_widget.was_dragged = true;
+          if (dx*dx + dy*dy > 25) {
+              if (!g_grid_locked) g_music_widget.was_dragged = true;
+          }
 
-          g_music_widget.x = (float)g_mouse_x - g_music_widget.drag_off_x;
-          g_music_widget.y = (float)g_mouse_y - g_music_widget.drag_off_y;
-          g_music_widget.target_x = g_music_widget.x;
-          g_music_widget.target_y = g_music_widget.y;
+          if (!g_grid_locked) {
+              g_music_widget.x = (float)g_mouse_x - g_music_widget.drag_off_x;
+              g_music_widget.y = (float)g_mouse_y - g_music_widget.drag_off_y;
+              g_music_widget.target_x = g_music_widget.x;
+              g_music_widget.target_y = g_music_widget.y;
+          }
         }
       }
       if (e.type == SDL_MOUSEBUTTONDOWN) {
@@ -2732,9 +2772,9 @@ int main(void) {
             uy = tx * s + ty * c + cy;
         }
 
-        if (ux > wx && ux < wx + ww && uy > wy && uy < wy + wh) {
+        if (is_music_widget_visible() && ux > wx && ux < wx + ww && uy > wy && uy < wy + wh) {
           // Check for Resize Handle (Right edge, 30px margin)
-          if (ux > wx + ww - 30) {
+          if (!g_grid_locked && ux > wx + ww - 30) {
             g_music_widget.is_resizing = true;
           } else {
             // Check if clicking controls
@@ -2769,7 +2809,7 @@ int main(void) {
           }
         }
 
-        if (g_sidebar_open && e.button.x > 15 && e.button.x < SIDEBAR_WIDTH - 15) {
+        if (g_sidebar_open && !g_settings_open && !g_config_open && e.button.x > 15 && e.button.x < SIDEBAR_WIDTH - 15) {
           // Home Tab Click
           if (e.button.y > TOP_BAR_HEIGHT + 75 && e.button.y < TOP_BAR_HEIGHT + 125) {
             if (g_current_tab != TAB_HOME) {
@@ -2806,11 +2846,17 @@ int main(void) {
           }
         }
 
-        int search_w = 400;
-        int search_x = (g_window_width - search_w) / 2;
+        int pill_w = 260;
+        int pill_x = g_window_width - pill_w - 30;
+        int search_w = g_search_active ? g_window_width - 160 : 100;
+        int search_x = 80;
+
+        bool clicked_search_bar = false;
+        bool clicked_search_result = false;
 
         if (e.button.x > search_x && e.button.x < search_x + search_w && e.button.y > 10 &&
             e.button.y < 50) {
+          clicked_search_bar = true;
           if (g_search_query[0] == '/' ||
               (g_search_query[0] == '.' && g_search_query[1] == '/')) {
             launch_player_process(g_search_query, true);
@@ -2818,14 +2864,22 @@ int main(void) {
           }
         }
 
-        if (g_result_count > 0 && e.button.x > search_x && e.button.x < search_x + search_w &&
+        if (g_result_count > 0 && g_search_active && e.button.x > search_x && e.button.x < search_x + search_w &&
             e.button.y > 60) {
           int i = (e.button.y - 65) / 50;
           if (i >= 0 && i < g_result_count) {
+            clicked_search_result = true;
             launch_player_process(g_results[i].filepath, true);
             g_search_query[0] = 0;
             g_result_count = 0;
+            g_search_active = false;
           }
+        }
+        
+        if (clicked_search_bar) {
+          g_search_active = true;
+        } else if (g_search_active && !clicked_search_result) {
+          g_search_active = false;
         }
       }
       if (e.type == SDL_MOUSEBUTTONUP) {
@@ -3035,7 +3089,7 @@ int main(void) {
       render_grid_drop_guides(ren, wcx, wcy);
     }
 
-    if (!draw_widget_late && (g_current_tab == TAB_MUSIC || g_music_widget.is_maximized) && g_music_widget.active) {
+    if (!draw_widget_late && is_music_widget_visible()) {
       RENDER_MUSIC_WIDGET_MACRO();
     }
 
@@ -3046,7 +3100,7 @@ int main(void) {
       SDL_Rect sb = {sx, TOP_BAR_HEIGHT, SIDEBAR_WIDTH, g_window_height - TOP_BAR_HEIGHT};
       SDL_RenderFillRect(ren, &sb);
       
-      if (!g_settings_open) {
+      if (!g_settings_open && !g_config_open) {
         // Navigation Header
         render_text(ren, "Navigation", sx + 30, TOP_BAR_HEIGHT + 45, g_theme.accent);
         
@@ -3129,18 +3183,33 @@ int main(void) {
         }
 
         // Settings Entry at the bottom
-        SDL_Rect set_btn = {sx + 20, g_window_height - 70, SIDEBAR_WIDTH - 40, 50};
+        SDL_Rect set_btn = {sx + 20, g_window_height - 70, SIDEBAR_WIDTH - 85, 50};
+        SDL_Rect edit_btn = {sx + SIDEBAR_WIDTH - 55, g_window_height - 70, 35, 50};
         bool hov_set = (g_mouse_x > set_btn.x && g_mouse_x < set_btn.x + set_btn.w &&
                          g_mouse_y > set_btn.y && g_mouse_y < set_btn.y + set_btn.h);
+        bool hov_edit = (g_mouse_x > edit_btn.x && g_mouse_x < edit_btn.x + edit_btn.w &&
+                         g_mouse_y > edit_btn.y && g_mouse_y < edit_btn.y + edit_btn.h);
+                         
         fill_rounded_rect_hq(ren, set_btn.x, set_btn.y, set_btn.w, set_btn.h, 12, 
                              hov_set ? (SDL_Color){50, 50, 50, 255} : (SDL_Color){35, 35, 35, 255});
         draw_rounded_outline_hq(ren, set_btn.x, set_btn.y, set_btn.w, set_btn.h, 12, 1, (SDL_Color){60, 60, 60, 255});
-        render_text(ren, "Settings  ⚙", set_btn.x + 45, set_btn.y + 32, g_theme.text_main);
+        render_text(ren, "Settings  ⚙", set_btn.x + 25, set_btn.y + 32, g_theme.text_main);
         
-        if (hov_set && SDL_GetMouseState(NULL, NULL) & SDL_BUTTON(SDL_BUTTON_LEFT)) {
-           g_settings_open = true;
+        fill_rounded_rect_hq(ren, edit_btn.x, edit_btn.y, edit_btn.w, edit_btn.h, 12, 
+                             hov_edit ? (SDL_Color){50, 50, 50, 255} : (SDL_Color){35, 35, 35, 255});
+        draw_rounded_outline_hq(ren, edit_btn.x, edit_btn.y, edit_btn.w, edit_btn.h, 12, 1, (SDL_Color){60, 60, 60, 255});
+        render_text_scaled(ren, "E", edit_btn.x + 12, edit_btn.y + 32, 1.0f, g_theme.text_main);
+        
+        if (SDL_GetMouseState(NULL, NULL) & SDL_BUTTON(SDL_BUTTON_LEFT)) {
+           if (hov_set) {
+               g_settings_open = true;
+               g_config_open = false;
+           } else if (hov_edit) {
+               g_config_open = true;
+               g_settings_open = false;
+           }
         }
-      } else {
+      } else if (g_settings_open) {
         // Settings Menu View
         render_text(ren, "← Back", sx + 25, TOP_BAR_HEIGHT + 40, g_theme.text_dim);
         if (g_mouse_x > sx + 20 && g_mouse_x < sx + 100 && g_mouse_y > TOP_BAR_HEIGHT + 15 && g_mouse_y < TOP_BAR_HEIGHT + 55) {
@@ -3222,6 +3291,57 @@ int main(void) {
                 SDL_CreateThread(hub_updater_thread_func, "HubUpdaterThread", NULL);
             }
         }
+      } else if (g_config_open) {
+        // Dashboard Config View
+        render_text(ren, "← Back", sx + 25, TOP_BAR_HEIGHT + 40, g_theme.text_dim);
+        if (g_mouse_x > sx + 20 && g_mouse_x < sx + 100 && g_mouse_y > TOP_BAR_HEIGHT + 15 && g_mouse_y < TOP_BAR_HEIGHT + 55) {
+          if (SDL_GetMouseState(NULL, NULL) & SDL_BUTTON(SDL_BUTTON_LEFT)) g_config_open = false;
+        }
+
+        render_text(ren, "Dashboard", sx + 30, TOP_BAR_HEIGHT + 85, g_theme.accent);
+        SDL_SetRenderDrawColor(ren, 40, 40, 40, 255);
+        SDL_RenderDrawLine(ren, sx + 25, TOP_BAR_HEIGHT + 100, sx + SIDEBAR_WIDTH - 25, TOP_BAR_HEIGHT + 100);
+
+        // Grid Lock Toggle
+        SDL_Rect lock_btn = {sx + 25, TOP_BAR_HEIGHT + 120, SIDEBAR_WIDTH - 50, 45};
+        bool hov_lock = (g_mouse_x > lock_btn.x && g_mouse_x < lock_btn.x + lock_btn.w &&
+                         g_mouse_y > lock_btn.y && g_mouse_y < lock_btn.y + lock_btn.h);
+        fill_rounded_rect_hq(ren, lock_btn.x, lock_btn.y, lock_btn.w, lock_btn.h, 10,
+                             hov_lock ? (SDL_Color){50, 50, 50, 255} : (SDL_Color){35, 35, 35, 255});
+        draw_rounded_outline_hq(ren, lock_btn.x, lock_btn.y, lock_btn.w, lock_btn.h, 10, 1, 
+                                g_grid_locked ? g_theme.accent : (SDL_Color){60, 60, 60, 255});
+        render_text_scaled(ren, g_grid_locked ? "[ Locked ]" : "[ Unlocked ]", lock_btn.x + 30, lock_btn.y + 28, 0.9f, g_theme.text_main);
+
+        if (hov_lock && (SDL_GetMouseState(NULL, NULL) & SDL_BUTTON(SDL_BUTTON_LEFT))) {
+            static uint32_t last_lock_click = 0;
+            if (SDL_GetTicks() - last_lock_click > 300) {
+                g_grid_locked = !g_grid_locked;
+                last_lock_click = SDL_GetTicks();
+            }
+        }
+
+        // Widgets
+        render_text(ren, "Widgets", sx + 30, TOP_BAR_HEIGHT + 195, g_theme.text_main);
+        SDL_SetRenderDrawColor(ren, 40, 40, 40, 255);
+        SDL_RenderDrawLine(ren, sx + 25, TOP_BAR_HEIGHT + 210, sx + SIDEBAR_WIDTH - 25, TOP_BAR_HEIGHT + 210);
+
+        // Music Widget Toggle
+        SDL_Rect mus_btn = {sx + 25, TOP_BAR_HEIGHT + 230, SIDEBAR_WIDTH - 50, 45};
+        bool hov_mus = (g_mouse_x > mus_btn.x && g_mouse_x < mus_btn.x + mus_btn.w &&
+                         g_mouse_y > mus_btn.y && g_mouse_y < mus_btn.y + mus_btn.h);
+        fill_rounded_rect_hq(ren, mus_btn.x, mus_btn.y, mus_btn.w, mus_btn.h, 10,
+                             hov_mus ? (SDL_Color){50, 50, 50, 255} : (SDL_Color){35, 35, 35, 255});
+        draw_rounded_outline_hq(ren, mus_btn.x, mus_btn.y, mus_btn.w, mus_btn.h, 10, 1, 
+                                g_music_widget.active ? g_theme.accent : (SDL_Color){60, 60, 60, 255});
+        render_text_scaled(ren, g_music_widget.active ? "Hide Music Widget" : "Show Music Widget", mus_btn.x + 20, mus_btn.y + 28, 0.85f, g_theme.text_main);
+
+        if (hov_mus && (SDL_GetMouseState(NULL, NULL) & SDL_BUTTON(SDL_BUTTON_LEFT))) {
+            static uint32_t last_mus_click = 0;
+            if (SDL_GetTicks() - last_mus_click > 300) {
+                g_music_widget.active = !g_music_widget.active;
+                last_mus_click = SDL_GetTicks();
+            }
+        }
       }
     }
 
@@ -3240,29 +3360,49 @@ int main(void) {
     int pill_w = 260;
     int pill_x = g_window_width - pill_w - 30;
 
-    int search_w = 400;
-    if (search_w > pill_x - 100) search_w = pill_x - 100;
-    int search_x = (pill_x + 60 - search_w) / 2; // Center between menu and pill
+    int search_w = g_search_active ? g_window_width - 160 : 100;
+    int search_x = 80;
+
+    if (g_search_active) {
+      SDL_SetRenderDrawColor(ren, 0, 0, 0, 200);
+      SDL_Rect dim_rect = {0, 0, g_window_width, g_window_height};
+      SDL_RenderFillRect(ren, &dim_rect);
+    }
 
     SDL_SetRenderDrawColor(ren, 40, 40, 40, 255);
     SDL_Rect srch = {search_x, 10, search_w, 40};
     SDL_RenderFillRect(ren, &srch);
-    render_text(ren, strlen(g_search_query) ? g_search_query : "Search Shit...",
-                search_x + 10, 35, g_theme.text_dim);
+    
+    if (g_search_active) {
+      render_text(ren, strlen(g_search_query) ? g_search_query : "Search Shit...",
+                  search_x + 10, 35, g_theme.text_dim);
+    } else {
+      render_text(ren, "Search", search_x + 20, 35, g_theme.text_dim);
+    }
 
-    render_now_playing_pill(ren, g_mouse_x, g_mouse_y);
+    if (!g_search_active) {
+      render_now_playing_pill(ren, g_mouse_x, g_mouse_y);
+    }
 
-    if (g_result_count > 0) {
+    if (g_result_count > 0 && g_search_active) {
       SDL_SetRenderDrawColor(ren, 30, 30, 30, 240);
-      SDL_Rect res_bg = {search_x, 60, search_w, g_result_count * 50};
+      SDL_Rect res_bg = {search_x, 60, search_w, g_result_count * 50 + 10};
       SDL_RenderFillRect(ren, &res_bg);
-      for (int i = 0; i < g_result_count; i++)
-        render_text(ren, g_results[i].title, search_x + 15, 95 + i * 50,
-                    g_theme.text_main);
+      for (int i = 0; i < g_result_count; i++) {
+        SDL_SetRenderDrawColor(ren, 50, 50, 50, 255);
+        if (i > 0) {
+          SDL_Rect sep = {search_x + 10, 60 + i * 50, search_w - 20, 1};
+          SDL_RenderFillRect(ren, &sep);
+        }
+        
+        char res_text[128];
+        snprintf(res_text, sizeof(res_text), "%s - %s", g_results[i].title, g_results[i].artist);
+        render_text(ren, res_text, search_x + 15, 95 + i * 50, g_theme.text_main);
+      }
     }
 
     // 6. Maximized Widgets (Drawn late)
-    if (draw_widget_late && g_music_widget.active) {
+    if (draw_widget_late && is_music_widget_visible()) {
       RENDER_MUSIC_WIDGET_MACRO();
     }
 

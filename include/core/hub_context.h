@@ -57,6 +57,7 @@ typedef struct {
   char search_query[MAX_SONG_TITLE];
   SearchResult results[HUB_MAX_SEARCH_RESULTS];
   int result_count;
+  bool search_active;
 
   /* Player Telemetry (received via ZMQ) */
   struct {

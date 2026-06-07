@@ -1,0 +1,351 @@
+[INFO] Logging initialized.
+[INFO] Initializing audio-only backend (Headless).
+[INFO] Audio backend initialized (Lock-Free Ring Buffer).
+[DEBUG] player_init: ctx=0x7f2a86d47010, songs=0, count=2816000, presets=2853480, size=2853496
+[INFO] Player initialized.
+[INFO] Database initialized successfully
+[DEBUG] db_get_all_albums: found 109 albums (grouped: 1)
+[INFO] Library loaded: 109 albums
+[INFO] MPRIS: Bus acquired, objects registered.
+[INFO] MPRIS: Name acquired.
+[INFO] get_metadata: Starting metadata read for path '/mnt/mass-storage/Archive/Music/Inon Zur/Starfield OST/Aurora.mp3'
+[DEBUG] command_dispatch: sizeof(PlayerContext)=2853496
+[INFO] Aurora
+[INFO] Using cached album art
+[INFO] Material You - Primary: (177,30,52), Secondary: (232,120,73), Tertiary: (213,125,74)
+[INFO] Logging initialized.
+[INFO] Initializing audio-only backend (Headless).
+[INFO] Audio backend initialized (Lock-Free Ring Buffer).
+[DEBUG] player_init: ctx=0x7f6b67b47010, songs=0, count=2816000, presets=2853480, size=2853496
+[INFO] Player initialized.
+[INFO] Database initialized successfully
+[DEBUG] db_get_all_albums: found 109 albums (grouped: 1)
+[INFO] Library loaded: 109 albums
+[INFO] MPRIS: Bus acquired, objects registered.
+[INFO] MPRIS: Name acquired.
+[INFO] get_metadata: Starting metadata read for path '/mnt/mass-storage/Archive/Music/Clair Obscur Expedition 33 â€“ Original Soundtrack/Disc 1 - Clair Obscur Expedition 33 Original Soundtrack (Act I) - 21 - L'Aurore aux Doigts de Roses.wav'
+[INFO] get_metadata: Trying WAV format
+[INFO] parse_wav: Found LIST INFO chunk
+[INFO] parse_wav: Found artist (IART)
+[INFO] parse_wav: Found title (INAM)
+[DEBUG] command_dispatch: sizeof(PlayerContext)=2853496
+[INFO] Spring Meadows - L’Aurore aux Doigts de Roses
+[INFO] Using cached album art
+[INFO] Material You - Primary: (86,32,28), Secondary: (97,59,41), Tertiary: (191,154,130)
+[INFO] Enabling GUI from headless state.
+[INFO] Window system initialized.
+[INFO] Material You - Primary: (100,100,255), Secondary: (100,100,255), Tertiary: (100,100,255)
+[INFO] Theme updated from image with advanced color extraction.
+[INFO] Font file read size: 410820
+[INFO] Inspecting font header...
+[INFO] Header: 00 01 00 00
+[INFO] Font Offset: 0
+[INFO] Font Metrics - Asc: 19.45, Desc: -4.55, Scale: 0.0105
+[INFO] Font baked height: 45
+[INFO] Font initialized (Safe Mode).
+[WARN] Visualizers directory not found.
+[INFO] Material You - Primary: (86,32,28), Secondary: (97,59,41), Tertiary: (191,154,130)
+[INFO] Theme updated from image with advanced color extraction.
+[DEBUG] material_renderer: sizeof(PlayerContext)=2853496, g_theme=0x55d2ed65ec80, presets=(nil)
+[INFO] Using cached WAV
+[INFO] Panorama
+[INFO] Using cached album art
+[INFO] Material You - Primary: (114,25,0), Secondary: (133,40,0), Tertiary: (162,63,0)
+[INFO] Theme updated from image with advanced color extraction.
+[INFO] Converting M4A to WAV...
+[INFO] M4A conversion complete
+[INFO] Afterhours (feat. Diplo & Nina Sky)
+[INFO] Using cached album art
+[INFO] Material You - Primary: (169,114,59), Secondary: (206,162,105), Tertiary: (81,62,38)
+[INFO] Theme updated from image with advanced color extraction.
+[INFO] Volume set to: 0.94
+[INFO] Volume set to: 0.46
+[INFO] Window closed. Reverting to headless mode.
+[INFO] Font system shutdown.
+[INFO] Material renderer and cached textures shut down.
+[INFO] Window system shutdown.
+[INFO] Logging initialized.
+[INFO] Initializing audio-only backend (Headless).
+[INFO] Audio backend initialized (Lock-Free Ring Buffer).
+[DEBUG] player_init: ctx=0x7f62ba947010, songs=0, count=2816000, presets=2853480, size=2853496
+[INFO] Player initialized.
+[INFO] Database initialized successfully
+[DEBUG] db_get_all_albums: found 109 albums (grouped: 1)
+[INFO] Library loaded: 109 albums
+[INFO] MPRIS: Bus acquired, objects registered.
+[INFO] MPRIS: Name acquired.
+[INFO] get_metadata: Starting metadata read for path '/mnt/mass-storage/Archive/Music/The Weeknd/After Hours/13 After Hours.m4a'
+[INFO] get_metadata: Trying M4A/MP4 format
+[INFO] parse_m4a: Valid MP4/M4A file
+[INFO] parse_m4a: Found moov atom
+[INFO] parse_m4a: Found udta atom
+[INFO] parse_m4a: Found ilst atom
+[INFO] parse_m4a: Found title
+[INFO] parse_m4a: Found artist
+[INFO] parse_m4a: Found album
+[INFO] parse_m4a: Found track number
+[DEBUG] command_dispatch: sizeof(PlayerContext)=2853496
+[INFO] Converting M4A to WAV...
+[INFO] M4A conversion complete
+[INFO] After Hours
+[INFO] Using cached album art
+[INFO] Material You - Primary: (107,2,8), Secondary: (108,53,18), Tertiary: (134,72,26)
+[INFO] get_metadata: Starting metadata read for path '/mnt/mass-storage/Archive/Music/TroyBoi/Afterhours (feat. Diplo & Nina Sky) - Si/01 Afterhours (feat. Diplo & Nina Sk.m4a'
+[INFO] get_metadata: Trying M4A/MP4 format
+[INFO] parse_m4a: Valid MP4/M4A file
+[INFO] parse_m4a: Found moov atom
+[INFO] parse_m4a: Found udta atom
+[INFO] parse_m4a: Found ilst atom
+[INFO] parse_m4a: Found title
+[INFO] parse_m4a: Found artist
+[INFO] parse_m4a: Found album
+[INFO] parse_m4a: Found track number
+[INFO] Using cached WAV
+[INFO] Afterhours (feat. Diplo & Nina Sky)
+[INFO] Using cached album art
+[INFO] Material You - Primary: (169,114,59), Secondary: (206,162,105), Tertiary: (81,62,38)
+[INFO] Enabling GUI from headless state.
+[INFO] Window system initialized.
+[INFO] Material You - Primary: (100,100,255), Secondary: (100,100,255), Tertiary: (100,100,255)
+[INFO] Theme updated from image with advanced color extraction.
+[INFO] Font file read size: 410820
+[INFO] Inspecting font header...
+[INFO] Header: 00 01 00 00
+[INFO] Font Offset: 0
+[INFO] Font Metrics - Asc: 19.45, Desc: -4.55, Scale: 0.0105
+[INFO] Font baked height: 45
+[INFO] Font initialized (Safe Mode).
+[WARN] Visualizers directory not found.
+[INFO] Material You - Primary: (169,114,59), Secondary: (206,162,105), Tertiary: (81,62,38)
+[INFO] Theme updated from image with advanced color extraction.
+[DEBUG] material_renderer: sizeof(PlayerContext)=2853496, g_theme=0x561b4b8b3c80, presets=(nil)
+[INFO] Playback paused.
+[INFO] Window closed. Reverting to headless mode.
+[INFO] Font system shutdown.
+[INFO] Material renderer and cached textures shut down.
+[INFO] Window system shutdown.
+[INFO] Logging initialized.
+[INFO] Initializing audio-only backend (Headless).
+[INFO] Audio backend initialized (Lock-Free Ring Buffer).
+[DEBUG] player_init: ctx=0x7f1af4347010, songs=0, count=2816000, presets=2853480, size=2853496
+[INFO] Player initialized.
+[INFO] Database initialized successfully
+[DEBUG] db_get_all_albums: found 109 albums (grouped: 1)
+[INFO] Library loaded: 109 albums
+[INFO] MPRIS: Bus acquired, objects registered.
+[INFO] MPRIS: Name acquired.
+[INFO] get_metadata: Starting metadata read for path '/mnt/mass-storage/Archive/Music/Qobuz/Elley_Duhe/MONEY_ON_THE_DASH/1-2-MONEY ON THE DASH-LLS.flac'
+[INFO] get_metadata: Trying FLAC format
+[INFO] parse_flac: Calculated duration
+[DEBUG] command_dispatch: sizeof(PlayerContext)=2853496
+[INFO] MONEY ON THE DASH
+[INFO] Using cached album art
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Playback stopped.
+[INFO] MONEY ON THE DASH
+[INFO] Using cached album art
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Enabling GUI from headless state.
+[INFO] Window system initialized.
+[INFO] Material You - Primary: (100,100,255), Secondary: (100,100,255), Tertiary: (100,100,255)
+[INFO] Theme updated from image with advanced color extraction.
+[INFO] Font file read size: 410820
+[INFO] Inspecting font header...
+[INFO] Header: 00 01 00 00
+[INFO] Font Offset: 0
+[INFO] Font Metrics - Asc: 19.45, Desc: -4.55, Scale: 0.0105
+[INFO] Font baked height: 45
+[INFO] Font initialized (Safe Mode).
+[WARN] Visualizers directory not found.
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Theme updated from image with advanced color extraction.
+[DEBUG] material_renderer: sizeof(PlayerContext)=2853496, g_theme=0x5640750a0c80, presets=(nil)
+[INFO] Playback stopped.
+[INFO] MONEY ON THE DASH
+[INFO] Using cached album art
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Theme updated from image with advanced color extraction.
+[INFO] Playback stopped.
+[INFO] MONEY ON THE DASH
+[INFO] Using cached album art
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Theme updated from image with advanced color extraction.
+[INFO] Playback stopped.
+[INFO] MONEY ON THE DASH
+[INFO] Using cached album art
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Theme updated from image with advanced color extraction.
+[INFO] Playback stopped.
+[INFO] MONEY ON THE DASH
+[INFO] Using cached album art
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Theme updated from image with advanced color extraction.
+[INFO] Window closed. Reverting to headless mode.
+[INFO] Font system shutdown.
+[INFO] Material renderer and cached textures shut down.
+[INFO] Window system shutdown.
+[INFO] Enabling GUI from headless state.
+[INFO] Window system initialized.
+[INFO] Material You - Primary: (100,100,255), Secondary: (100,100,255), Tertiary: (100,100,255)
+[INFO] Theme updated from image with advanced color extraction.
+[INFO] Font file read size: 410820
+[INFO] Inspecting font header...
+[INFO] Header: 00 01 00 00
+[INFO] Font Offset: 0
+[INFO] Font Metrics - Asc: 19.45, Desc: -4.55, Scale: 0.0105
+[INFO] Font baked height: 45
+[INFO] Font initialized (Safe Mode).
+[WARN] Visualizers directory not found.
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Theme updated from image with advanced color extraction.
+[INFO] Window closed. Reverting to headless mode.
+[INFO] Font system shutdown.
+[INFO] Material renderer and cached textures shut down.
+[INFO] Window system shutdown.
+[INFO] Logging initialized.
+[INFO] Initializing audio-only backend (Headless).
+[INFO] Audio backend initialized (Lock-Free Ring Buffer).
+[DEBUG] player_init: ctx=0x7f1aca547010, songs=0, count=2816000, presets=2853480, size=2853496
+[INFO] Player initialized.
+[INFO] Database initialized successfully
+[DEBUG] db_get_all_albums: found 109 albums (grouped: 1)
+[INFO] Library loaded: 109 albums
+[INFO] MPRIS: Bus acquired, objects registered.
+[INFO] MPRIS: Name acquired.
+[INFO] Logging initialized.
+[INFO] Initializing audio-only backend (Headless).
+[INFO] Audio backend initialized (Lock-Free Ring Buffer).
+[DEBUG] player_init: ctx=0x7fb85dd47010, songs=0, count=2816000, presets=2853480, size=2853496
+[INFO] Player initialized.
+[INFO] Database initialized successfully
+[DEBUG] db_get_all_albums: found 109 albums (grouped: 1)
+[INFO] Library loaded: 109 albums
+[INFO] MPRIS: Bus acquired, objects registered.
+[INFO] MPRIS: Name acquired.
+[INFO] get_metadata: Starting metadata read for path '/mnt/mass-storage/Archive/Music/Qobuz/Elley_Duhe/MONEY_ON_THE_DASH/1-2-MONEY ON THE DASH-LLS.flac'
+[INFO] get_metadata: Trying FLAC format
+[INFO] parse_flac: Calculated duration
+[DEBUG] command_dispatch: sizeof(PlayerContext)=2853496
+[INFO] MONEY ON THE DASH
+[INFO] Using cached album art
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Logging initialized.
+[INFO] Initializing audio-only backend (Headless).
+[INFO] Audio backend initialized (Lock-Free Ring Buffer).
+[DEBUG] player_init: ctx=0x7f8ddc747010, songs=0, count=2816000, presets=2853480, size=2853496
+[INFO] Player initialized.
+[INFO] Database initialized successfully
+[DEBUG] db_get_all_albums: found 109 albums (grouped: 1)
+[INFO] Library loaded: 109 albums
+[INFO] MPRIS: Bus acquired, objects registered.
+[INFO] MPRIS: Name acquired.
+[INFO] get_metadata: Starting metadata read for path '/mnt/mass-storage/Archive/Music/Qobuz/Elley_Duhe/MONEY_ON_THE_DASH/1-2-MONEY ON THE DASH-LLS.flac'
+[INFO] get_metadata: Trying FLAC format
+[INFO] parse_flac: Calculated duration
+[DEBUG] command_dispatch: sizeof(PlayerContext)=2853496
+[INFO] MONEY ON THE DASH
+[INFO] Using cached album art
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Playback stopped.
+[INFO] MONEY ON THE DASH
+[INFO] Using cached album art
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Logging initialized.
+[INFO] Initializing audio-only backend (Headless).
+[INFO] Audio backend initialized (Lock-Free Ring Buffer).
+[DEBUG] player_init: ctx=0x7f7ef1947010, songs=0, count=2816000, presets=2853480, size=2853496
+[INFO] Player initialized.
+[INFO] Database initialized successfully
+[DEBUG] db_get_all_albums: found 109 albums (grouped: 1)
+[INFO] Library loaded: 109 albums
+[INFO] MPRIS: Bus acquired, objects registered.
+[INFO] MPRIS: Name acquired.
+[INFO] get_metadata: Starting metadata read for path '/mnt/mass-storage/Archive/Music/Qobuz/Elley_Duhe/MONEY_ON_THE_DASH/1-2-MONEY ON THE DASH-LLS.flac'
+[INFO] get_metadata: Trying FLAC format
+[INFO] parse_flac: Calculated duration
+[DEBUG] command_dispatch: sizeof(PlayerContext)=2853496
+[INFO] MONEY ON THE DASH
+[INFO] Using cached album art
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Playback stopped.
+[INFO] MONEY ON THE DASH
+[INFO] Using cached album art
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Playback stopped.
+[INFO] MONEY ON THE DASH
+[INFO] Using cached album art
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Playback stopped.
+[INFO] MONEY ON THE DASH
+[INFO] Using cached album art
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Playback stopped.
+[INFO] MONEY ON THE DASH
+[INFO] Using cached album art
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Logging initialized.
+[INFO] Initializing audio-only backend (Headless).
+[INFO] Audio backend initialized (Lock-Free Ring Buffer).
+[DEBUG] player_init: ctx=0x7fcc71f47010, songs=0, count=2816000, presets=2853480, size=2853496
+[INFO] Player initialized.
+[INFO] Database initialized successfully
+[DEBUG] db_get_all_albums: found 109 albums (grouped: 1)
+[INFO] Library loaded: 109 albums
+[INFO] MPRIS: Bus acquired, objects registered.
+[INFO] MPRIS: Name acquired.
+[INFO] Logging initialized.
+[INFO] Initializing audio-only backend (Headless).
+[INFO] Audio backend initialized (Lock-Free Ring Buffer).
+[DEBUG] player_init: ctx=0x7ff665947010, songs=0, count=2816000, presets=2853480, size=2853496
+[INFO] Player initialized.
+[INFO] Database initialized successfully
+[DEBUG] db_get_all_albums: found 109 albums (grouped: 1)
+[INFO] Library loaded: 109 albums
+[INFO] MPRIS: Bus acquired, objects registered.
+[INFO] MPRIS: Name acquired.
+[INFO] get_metadata: Starting metadata read for path '/mnt/mass-storage/Archive/Music/Qobuz/Elley_Duhe/MONEY_ON_THE_DASH/1-3-MONEY ON THE DASH  -LLS.flac'
+[INFO] get_metadata: Trying FLAC format
+[INFO] parse_flac: Calculated duration
+[DEBUG] command_dispatch: sizeof(PlayerContext)=2853496
+[INFO] MONEY ON THE DASH   (SPED UP INSTRUMENTAL)
+[INFO] Using cached album art
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Playback paused.
+[INFO] Logging initialized.
+[INFO] Initializing audio-only backend (Headless).
+[INFO] Audio backend initialized (Lock-Free Ring Buffer).
+[DEBUG] player_init: ctx=0x7f4daf347010, songs=0, count=2816000, presets=2853480, size=2853496
+[INFO] Player initialized.
+[INFO] Database initialized successfully
+[DEBUG] db_get_all_albums: found 109 albums (grouped: 1)
+[INFO] Library loaded: 109 albums
+[INFO] MPRIS: Bus acquired, objects registered.
+[INFO] MPRIS: Name acquired.
+[INFO] get_metadata: Starting metadata read for path '/mnt/mass-storage/Archive/Music/Qobuz/Elley_Duhe/MONEY_ON_THE_DASH/1-2-MONEY ON THE DASH-LLS.flac'
+[INFO] get_metadata: Trying FLAC format
+[INFO] parse_flac: Calculated duration
+[DEBUG] command_dispatch: sizeof(PlayerContext)=2853496
+[INFO] MONEY ON THE DASH
+[INFO] Using cached album art
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Playback stopped.
+[INFO] MONEY ON THE DASH
+[INFO] Using cached album art
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)
+[INFO] Logging initialized.
+[INFO] Initializing audio-only backend (Headless).
+[INFO] Audio backend initialized (Lock-Free Ring Buffer).
+[DEBUG] player_init: ctx=0x7fcac0347010, songs=0, count=2816000, presets=2853480, size=2853496
+[INFO] Player initialized.
+[INFO] Database initialized successfully
+[DEBUG] db_get_all_albums: found 109 albums (grouped: 1)
+[INFO] Library loaded: 109 albums
+[INFO] MPRIS: Bus acquired, objects registered.
+[INFO] MPRIS: Name acquired.
+[INFO] get_metadata: Starting metadata read for path '/mnt/mass-storage/Archive/Music/Qobuz/Elley_Duhe/MONEY_ON_THE_DASH/1-2-MONEY ON THE DASH-LLS.flac'
+[INFO] get_metadata: Trying FLAC format
+[INFO] parse_flac: Calculated duration
+[DEBUG] command_dispatch: sizeof(PlayerContext)=2853496
+[INFO] MONEY ON THE DASH
+[INFO] Using cached album art
+[INFO] Material You - Primary: (140,55,43), Secondary: (188,78,58), Tertiary: (165,67,58)

@@ -17,6 +17,7 @@ void hub_process_events(HubContext *hub) {
 
     /* Text Input (search bar) */
     if (e.type == SDL_TEXTINPUT) {
+      hub->search_active = true;
       strncat(hub->search_query, e.text.text,
               MAX_SONG_TITLE - strlen(hub->search_query) - 1);
       perform_search(hub->search_query, hub->results, &hub->result_count);
@@ -26,6 +27,7 @@ void hub_process_events(HubContext *hub) {
     if (e.type == SDL_KEYDOWN) {
       if (e.key.keysym.sym == SDLK_BACKSPACE &&
           strlen(hub->search_query) > 0) {
+        hub->search_active = true;
         hub->search_query[strlen(hub->search_query) - 1] = 0;
         perform_search(hub->search_query, hub->results, &hub->result_count);
       }
@@ -33,6 +35,7 @@ void hub_process_events(HubContext *hub) {
         hub->sidebar_open = false;
         hub->context_menu_open = false;
         hub->context_menu_submenu_open = false;
+        hub->search_active = false;
       }
       if (e.key.keysym.sym == SDLK_TAB) {
         hub->widget_mgr.is_edit_mode = !hub->widget_mgr.is_edit_mode;
@@ -242,25 +245,44 @@ void hub_process_events(HubContext *hub) {
           launch_player_process(hub, NULL, true);
       }
 
-      /* Search bar click — direct file path launch */
-      if (e.button.x > 250 && e.button.x < 650 && e.button.y > 10 &&
-          e.button.y < 50) {
+      /* Search bar click */
+      bool clicked_search_bar = false;
+      if (hub->search_active) {
+        if (e.button.x > 80 && e.button.x < HUB_WINDOW_WIDTH - 20 && e.button.y > 10 && e.button.y < 50) {
+          clicked_search_bar = true;
+        }
+      } else {
+        if (e.button.x > 250 && e.button.x < 650 && e.button.y > 10 && e.button.y < 50) {
+          clicked_search_bar = true;
+        }
+      }
+
+      if (clicked_search_bar) {
+        hub->search_active = true;
         if (hub->search_query[0] == '/' ||
             (hub->search_query[0] == '.' && hub->search_query[1] == '/')) {
           launch_player_process(hub, hub->search_query, true);
           hub->search_query[0] = 0;
+          hub->search_active = false;
         }
       }
 
       /* Search result click */
-      if (hub->result_count > 0 && e.button.x > 250 && e.button.x < 650 &&
-          e.button.y > 60) {
-        int i = (e.button.y - 65) / 50;
+      bool clicked_search_result = false;
+      if (hub->search_active && hub->result_count > 0 && e.button.y > 60) {
+        int i = (e.button.y - 80) / 70; /* Using larger rows in the revamp */
         if (i >= 0 && i < hub->result_count) {
           launch_player_process(hub, hub->results[i].filepath, true);
           hub->search_query[0] = 0;
           hub->result_count = 0;
+          hub->search_active = false;
+          clicked_search_result = true;
         }
+      }
+
+      /* Clicked outside active search */
+      if (hub->search_active && !clicked_search_bar && !clicked_search_result) {
+        hub->search_active = false;
       }
     }
   }
